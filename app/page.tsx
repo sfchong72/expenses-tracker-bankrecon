@@ -92,7 +92,7 @@ export default function Home() {
     if (!bank.length) { setErr("Import bank transactions first"); return; }
     setBusy(true); const ins: Row[] = [], paid: string[] = [];
     for (const b of openB.filter(x => x.direction === "debit")) {
-      const i = openI.find(x => !paid.includes(x.id) && Number(x.amount) === Number(b.amount) && age(x.due_date, b.transaction_date) <= 3);
+      const i = openI.find(x => !paid.includes(x.id) && Number(x.amount) === Number(b.amount) && (age(x.invoice_date, b.transaction_date) <= 3 || age(x.due_date, b.transaction_date) <= 3));
       if (i) { ins.push(payload(b.id, "invoice", i.id, b.amount, "exact", "system")); paid.push(i.id); continue; }
       const r = openR.find(x => !ins.some(y => y.receipt_id === x.id) && Number(x.amount) === Number(b.amount) && age(x.expense_date, b.transaction_date) <= 3);
       if (r) ins.push(payload(b.id, "receipt", r.id, b.amount, "exact", "system"));
