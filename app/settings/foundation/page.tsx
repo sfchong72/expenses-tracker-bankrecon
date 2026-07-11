@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AuthBar } from "@/app/auth-bar";
 import { createClient } from "@/lib/supabase/client";
 
 type Entity = {
@@ -62,6 +63,7 @@ export default function FoundationSettingsPage() {
           <b>{entities.length} entities</b>
           <b>{accounts.length} accounts</b>
         </div>
+        <AuthBar />
       </header>
 
       <nav>
