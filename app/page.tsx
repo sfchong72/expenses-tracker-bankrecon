@@ -43,7 +43,18 @@ export default function Home() {
     else { setInvoices(i.data ?? []); setReceipts(r.data ?? []); setBank(b.data ?? []); setMatches(m.data ?? []); setNote("Ready"); }
     setBusy(false);
   }
-  async function done(e: any, ok: string) { if (e) { setErr(e.message); setNote("Save failed; retry when ready."); } else { setNote(ok); await load(); } setBusy(false); }
+  async function done(e: any, ok: string) {
+    if (e) {
+      setErr(e.message);
+      setNote("Save failed; retry when ready.");
+      setBusy(false);
+      return false;
+    }
+    setNote(ok);
+    await load();
+    setBusy(false);
+    return true;
+  }
 
   const usedB = new Set(matches.map(m => m.bank_transaction_id));
   const usedI = new Set(matches.map(m => m.invoice_id).filter(Boolean));
@@ -58,19 +69,27 @@ export default function Home() {
     e.preventDefault(); setBusy(true);
     const p = { ...invoice, amount: Number(invoice.amount), currency: "MYR", description: invoice.description || null, reference_number: invoice.reference_number || null };
     const res = editI ? await db.from("invoices").update(p).eq("id", editI) : await db.from("invoices").insert(p);
-    setEditI(""); setInvoice({ vendor: "", amount: "", invoice_date: today, due_date: week, status: "unpaid", reference_number: "", description: "" }); await done(res.error, "Invoice saved");
+    if (await done(res.error, "Invoice saved")) {
+      setEditI("");
+      setInvoice({ vendor: "", amount: "", invoice_date: today, due_date: week, status: "unpaid", reference_number: "", description: "" });
+    }
   }
   async function saveReceipt(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const p = { ...receipt, amount: Number(receipt.amount), currency: "MYR", description: receipt.description || null };
     const res = editR ? await db.from("receipts").update(p).eq("id", editR) : await db.from("receipts").insert(p);
-    setEditR(""); setReceipt({ merchant: "", amount: "", expense_date: today, category: "General", description: "" }); await done(res.error, "Receipt saved");
+    if (await done(res.error, "Receipt saved")) {
+      setEditR("");
+      setReceipt({ merchant: "", amount: "", expense_date: today, category: "General", description: "" });
+    }
   }
   async function saveBank(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const p = { ...tx, amount: Number(tx.amount), bank_reference: tx.bank_reference || null, statement_month: tx.statement_month || tx.transaction_date.slice(0, 7) };
     const res = await db.from("bank_transactions").insert(p);
-    setTx({ description: "", amount: "", direction: "debit", transaction_date: today, bank_reference: "", statement_month: today.slice(0, 7) }); await done(res.error, "Bank row saved");
+    if (await done(res.error, "Bank row saved")) {
+      setTx({ description: "", amount: "", direction: "debit", transaction_date: today, bank_reference: "", statement_month: today.slice(0, 7) });
+    }
   }
   async function del(table: string, id: string, name: string) {
     if (!confirm(`Delete ${name}? Matched rows will be unlinked.`)) return;
@@ -85,7 +104,7 @@ export default function Home() {
     if (!preview.length || !confirm(`Import ${preview.length} rows?`)) return;
     setBusy(true); const res = await db.from("bank_transactions").insert(preview);
     if (!res.error) await db.from("audit_logs").insert({ action: "bank_rows_imported", entity_type: "bank_transaction", payload: { row_count: preview.length } });
-    setPreview([]); await done(res.error, "CSV imported");
+    if (await done(res.error, "CSV imported")) setPreview([]);
   }
   const payload = (b: string, kind: string, id: string, amount: number, type: string, by: string) => ({ bank_transaction_id: b, invoice_id: kind === "invoice" ? id : null, receipt_id: kind === "receipt" ? id : null, match_type: type, match_value: amount, match_value_source: by, match_value_confidence: type === "exact" ? 1 : null, match_value_review_status: "accepted", matched_by: by, status: "accepted" });
   async function autoMatch() {
