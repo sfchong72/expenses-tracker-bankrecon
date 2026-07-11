@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AuthBar } from "@/app/auth-bar";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, any>;
@@ -136,8 +137,8 @@ export default function Home() {
   }
 
   return <main>
-    <header><div><span>Internal finance workspace</span><h1>Expenses Tracker & Bank Reconciliation</h1></div><div className="metrics"><b>{joined.length} matched</b><b>MYR {money(total)}</b><b>{bank.length ? Math.round(joined.length / bank.length * 100) : 0}%</b></div></header>
-    <nav>{["reconcile","invoices","receipts","bank","report"].map(t => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}</nav>
+    <header><div><span>Internal finance workspace</span><h1>Finance Operations Dashboard</h1></div><div className="metrics"><b>{joined.length} matched</b><b>MYR {money(total)}</b><b>{bank.length ? Math.round(joined.length / bank.length * 100) : 0}%</b></div><AuthBar /></header>
+    <nav>{["reconcile","invoices","receipts","bank","report"].map(t => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}<button onClick={() => { window.location.href = "/settings/foundation"; }}>settings</button></nav>
     <p className={err ? "notice error" : "notice"}>{err || note}<button onClick={() => void load()}>Refresh</button></p>{busy && <div className="skeleton" />}
     {tab === "reconcile" && <section className="grid"><Panel title="Matched Pairs" action={<button onClick={() => void autoMatch()}>Run Auto-Match</button>}><Matches rows={joined} /></Panel><Panel title="Manual Match"><select value={pickBank} onChange={e => setPickBank(e.target.value)}><option value="">Unmatched bank row</option>{openB.map(b => <option key={b.id} value={b.id}>{b.description} - {money(b.amount)}</option>)}</select><select value={pickTarget} onChange={e => setPickTarget(e.target.value)}><option value="">Unmatched invoice or receipt</option>{openI.map(i => <option key={i.id} value={`invoice:${i.id}`}>Invoice - {i.vendor} - {money(i.amount)}</option>)}{openR.map(r => <option key={r.id} value={`receipt:${r.id}`}>Receipt - {r.merchant} - {money(r.amount)}</option>)}</select><button onClick={() => void manualMatch()}>Create Manual Match</button><Mini title="Unmatched Bank Rows" rows={openB.map(b => `${b.description} - ${money(b.amount)}`)} /><Mini title="Unmatched Invoices" rows={openI.map(i => `${i.vendor} - ${money(i.amount)}`)} /><Mini title="Unmatched Receipts" rows={openR.map(r => `${r.merchant} - ${money(r.amount)}`)} /></Panel></section>}
     {tab === "invoices" && <section className="grid"><Panel title="Invoice Form"><Form data={invoice} set={setInvoice} save={saveInvoice} selects={{ status: ["unpaid","paid","overdue"] }} /></Panel><Panel title="Invoices"><Grid rows={invoices} cols={["vendor","amount","due_date","status"]} edit={r => { setEditI(r.id); setInvoice({ vendor: r.vendor, amount: String(r.amount), invoice_date: r.invoice_date, due_date: r.due_date, status: r.status, reference_number: r.reference_number ?? "", description: r.description ?? "" }); }} del={r => void del("invoices", r.id, r.vendor)} /></Panel></section>}
