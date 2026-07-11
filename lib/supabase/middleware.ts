@@ -1,7 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: Parameters<NextResponse["cookies"]["set"]>[2];
+};
+
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  const isLogin = pathname === "/login";
+  const isAccessDenied = pathname === "/access-denied";
+  const isApi = pathname.startsWith("/api/");
   const supabaseResponse = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -22,7 +32,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieToSet[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
@@ -34,8 +44,68 @@ export async function updateSession(request: NextRequest) {
       },
     });
 
-    // Refresh session so it doesn't expire while user is active
-    await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      if (isLogin) return response;
+      if (isApi) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.searchParams.set("next", pathname);
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("app_profiles")
+      .select("id, role, active_status")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      if (isLogin) return response;
+      if (isApi) {
+        return NextResponse.json({ error: "No active application profile" }, { status: 403 });
+      }
+
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.searchParams.set("error", "no_profile");
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (!profile.active_status) {
+      if (isLogin) return response;
+      if (isApi) {
+        return NextResponse.json({ error: "Account inactive" }, { status: 403 });
+      }
+
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.searchParams.set("error", "inactive");
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (isLogin) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (pathname.startsWith("/settings") && profile.role !== "owner") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/access-denied";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (isAccessDenied) return response;
+
     return response;
   } catch {
     // Never let an auth hiccup crash the entire edge middleware
