@@ -6,6 +6,8 @@ header { display: flex; justify-content: space-between; gap: 16px; align-items: 
 header span { color: #667085; font-size: 13px; text-transform: uppercase; font-weight: 700; }
 h1 { margin: 4px 0 0; font-size: 32px; }
 nav { display: flex; gap: 8px; overflow-x: auto; padding: 18px 0; }
+.shortcutbar { max-width: 1280px; margin: 0 auto; padding: 10px 22px 0; display: flex; gap: 8px; overflow-x: auto; }
+.shortcutbar a { border: 1px solid #ddd4c4; background: white; color: #202124; min-height: 32px; padding: 0 10px; display: inline-flex; align-items: center; text-decoration: none; font-size: 13px; white-space: nowrap; }
 button { min-height: 36px; border: 1px solid #2f4d3f; background: #2f4d3f; color: white; padding: 0 12px; cursor: pointer; }
 nav button { background: white; color: #202124; border-color: #ddd4c4; min-width: 118px; }
 nav .active { background: #245b8f; color: white; border-color: #245b8f; }
