@@ -1,4 +1,6 @@
-# Phase 2 Supplier Bills
+# Internal Finance Operations Dashboard - Phase 2 Supplier Bills
+
+Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness
 
 ## Scope Implemented
 
