@@ -1,4 +1,6 @@
-# PRD — Expenses Tracker & Bank Reconciliation
+# PRD - Internal Finance Operations Dashboard
+
+Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness
 
 ## Problem
 Every month the team manually cross-checks company invoices and personal expense receipts against a bank statement to produce an auditor-ready reconciliation for SQL accounting entry. The process takes several hours and is error-prone.
