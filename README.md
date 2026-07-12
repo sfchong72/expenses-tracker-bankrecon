@@ -1,41 +1,32 @@
-# vibe-stack-supabase
+# Internal Finance Operations Dashboard
 
-Next.js 15 + Supabase starter for shipping vibe-coded apps fast. Clone, provision, build.
+Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness.
+
+This is an internal finance workspace for supplier bills, recurring obligations, payment vouchers, document evidence, student payment tracking, bank reconciliation, and audit preparation.
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js 15 (App Router, React 19, Server Actions) |
-| Language | TypeScript strict |
-| Styles | Tailwind CSS v4 (CSS-first, no config file) |
-| Auth + DB | Supabase (`@supabase/ssr`) |
-| Package manager | Bun |
-| Deploy | Vercel |
+| Framework | Next.js 15 App Router |
+| Language | TypeScript |
+| Auth + DB | Supabase Auth, Postgres, RLS, Storage |
+| Package manager | pnpm |
+| Deploy | Vercel through the existing GitHub connection |
 
-## Quick start
+## Current Modules
 
-```bash
-bun install
-cp .env.example .env.local   # fill in your Supabase keys
-bun dev
-```
+- Authentication and role-based access control
+- Entity settings for IEA, IETA, PLC, and KALER
+- Supplier bills and recurring monthly obligations
+- Payment vouchers with entity/month numbering
+- Private supporting document uploads
+- Missing-document tracking
+- Bank reconciliation workspace
 
-Open http://localhost:3000. Edit `app/page.tsx` to start building.
+## Phase Notes
 
-## Provisioning a new project
+- Phase 1 established the protected foundation, entities, roles, permissions, and settings.
+- Phase 2 adds supplier bills, recurring obligations, payment vouchers, private documents, and missing-document readiness checks.
 
-Use the `/new-vibe-project <name>` skill (see `claude-dotfiles` repo) which:
-1. Clones this template and renames it
-2. Creates a new GitHub repo and pushes
-3. Creates a Supabase project and injects URL + anon key
-4. Creates a Vercel project linked to the GitHub repo
-5. Triggers first deploy and returns the preview URL
-
-## Working with AI
-
-See [CLAUDE.md](CLAUDE.md) for conventions. This repo is pre-wired for gstack — start with `/office-hours`.
-
-## Switching to Neon
-
-If you need Postgres without Supabase (e.g. prefer Drizzle ORM + Clerk for auth), a `vibe-stack-neon` variant is planned. For now: fork this and swap `@supabase/ssr` for `drizzle-orm` + `@neondatabase/serverless`, add Clerk or NextAuth.
+Routes and deployment project names are intentionally unchanged for now.
