@@ -7,7 +7,7 @@ export default function LoginPage() {
   const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("Sign in with your Supabase email and password.");
+  const [message, setMessage] = useState("Sign in to Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness.");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -59,7 +59,7 @@ export default function LoginPage() {
     <main>
       <header>
         <div>
-          <span>Phase 1 access</span>
+          <span>Internal Finance Operations Dashboard</span>
           <h1>Login</h1>
         </div>
       </header>
@@ -79,7 +79,7 @@ export default function LoginPage() {
         </div>
 
         <div className="panel">
-          <h2>Phase 1 Notes</h2>
+          <h2>Access Notes</h2>
           <div className="mini">
             <p>Only users with an active application profile can open the dashboard.</p>
             <p>Owner access is required for company settings and bank balance records.</p>
