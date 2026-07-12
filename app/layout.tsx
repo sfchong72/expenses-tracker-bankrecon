@@ -3,8 +3,8 @@ import { Phase2Shortcuts } from "@/app/phase2-shortcuts";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Expenses Tracker & Bank Reconciliation",
-  description: "Internal expenses and bank reconciliation workspace",
+  title: "Internal Finance Operations Dashboard",
+  description: "Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness",
 };
 
 export default function RootLayout({
