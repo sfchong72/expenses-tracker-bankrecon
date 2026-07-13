@@ -17,6 +17,7 @@ export function Phase2Shortcuts() {
   return (
     <div className="shortcutbar">
       <a href="/suppliers">Suppliers</a>
+      <a href="/suppliers/import">Import</a>
       <a href="/bills">Bills</a>
       <a href="/recurring">Recurring</a>
       <a href="/payment-vouchers">Payment Vouchers</a>
