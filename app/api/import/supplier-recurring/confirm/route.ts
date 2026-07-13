@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     successful++; await updateRow(supabase, importRowId, row, "success", "Imported", [], supplierId, recurringId); results.push({ rowNumber: row.rowNumber, status: "success", supplierId, recurringId });
   }
   const finalStatus = failed ? "completed_with_errors" : "completed";
-  await supabase.from("import_batches").update({ status: finalStatus, successful_rows: successful, skipped_rows: skipped, failed_rows: failed, result_summary: { results } }).eq("id", batchId);
+  await supabase.from("import_batches").update({ status: finalStatus, successful_rows: successful, skipped_rows: skipped, failed_rows: failed, has_created_records: successful > 0, last_action: "confirmed", last_action_at: new Date().toISOString(), last_action_by: user?.id, result_summary: { results } }).eq("id", batchId);
   await supabase.from("audit_logs").insert({ actor_user_id: user?.id, action: "supplier_recurring_import_confirmed", entity_type: "import_batch", entity_id: batchId, payload: { successful, skipped, failed }, data_origin: "manual" });
   return NextResponse.json({ status: finalStatus, successful, skipped, failed, results });
 }
