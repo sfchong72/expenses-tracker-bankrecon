@@ -59,8 +59,8 @@ export default function LoginPage() {
     <main>
       <header>
         <div>
-          <span>Internal Finance Operations Dashboard</span>
-          <h1>Login</h1>
+          <span>Secure sign in</span>
+          <h1>Internal Finance Operations Dashboard</h1>
         </div>
       </header>
 
