@@ -252,4 +252,4 @@ create table if not exists bank_reconciliation_events (
   created_at timestamptz not null default now()
 );
 
--- Continued in local migration: functions, safe views, RLS policies, grants and revokes.
+-- Migration continues with triggers, functions, safe views, policies and grants in the local validated copy.
