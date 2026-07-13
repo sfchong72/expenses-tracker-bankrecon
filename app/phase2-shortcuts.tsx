@@ -12,6 +12,10 @@ const navItems = [
   { label: "Payment Vouchers", href: "/payment-vouchers" },
   { label: "Documents", href: "/documents" },
   { label: "Missing Documents", href: "/missing-documents" },
+  { label: "Bank Imports", href: "/bank-imports" },
+  { label: "Bank Transactions", href: "/bank-transactions" },
+  { label: "Reconcile", href: "/reconcile" },
+  { label: "Bank Report", href: "/reports/bank-reconciliation" },
   { label: "Settings", href: "/settings/foundation" },
 ];
 
