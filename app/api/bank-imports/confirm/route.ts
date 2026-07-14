@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normaliseMapped, sanitizeRecord, statementMonthStart, validateMappedBankRow } from "@/lib/import/bank-statement";
+import { makeFingerprint, normaliseMapped, sanitizeRecord, statementMonthStart, validateMappedBankRow } from "@/lib/import/bank-statement";
 import { requireBankAccess } from "@/app/api/bank-imports/_shared";
 
 type IncomingRow = {
@@ -76,6 +76,7 @@ export async function POST(request: Request) {
       reviewNeeded += 1;
     }
 
+    const duplicateFingerprint = makeFingerprint(batch.data.bank_account_id, mapped);
     const payload = {
       entity_id: batch.data.entity_id,
       bank_account_id: batch.data.bank_account_id,
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
       statement_month: statementMonthStart(String(batch.data.statement_month)),
       source_import_batch_id: batchId,
       source_import_row_id: importRowId,
-      duplicate_fingerprint: row.mapped.duplicate_fingerprint || null,
+      duplicate_fingerprint: duplicateFingerprint || null,
       reconciliation_status: "unmatched",
       data_origin: "imported",
       is_demo: false,
