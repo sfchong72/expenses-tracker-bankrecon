@@ -1,38 +1,41 @@
 # PRD - Internal Finance Operations Dashboard
 
-Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness
+Expense administration, payment preparation and supporting-document control.
 
-## Problem
-Every month the team manually cross-checks company invoices and personal expense receipts against a bank statement to produce an auditor-ready reconciliation for SQL accounting entry. The process takes several hours and is error-prone.
+Bank reconciliation and official accounting records are maintained in SQL Accounting. This application supports expense administration, payment preparation and supporting-document control.
 
 ## Target Users
-Business owner + finance staff (internal only, not a public product).
+Business owner, finance staff, data-entry staff and read-only reviewers.
+
+## Active Scope
+- Suppliers and payees
+- Expense categories
+- Recurring obligations
+- Supplier bills
+- Payment vouchers
+- Supporting documents
+- Missing-document tracking
+- Payment preparation and audit evidence
 
 ## Core Objects
 | Object | Purpose |
 |---|---|
-| Invoice | Company bill to pay — vendor, amount, due date, status |
-| Receipt | Personal/daily expense — merchant, amount, date, category |
-| Bank Transaction | Row from the monthly bank statement |
-| Reconciliation Match | Links a bank transaction to an invoice or receipt |
-| Audit Log | Immutable record of every meaningful action |
+| Supplier / Payee | Party to be paid, with contact and payment details |
+| Expense Category | Operational category used for bills and voucher items |
+| Recurring Obligation | Monthly or periodic payment obligation |
+| Supplier Bill | Invoice, statutory payment, payroll support, or other payable record |
+| Payment Voucher | Prepared payment instruction with printable evidence |
+| Document | Private supporting document linked to bills, vouchers, payments, or obligations |
+| Audit Log | Immutable record of important actions |
 
-## MVP Must-Haves
-- [ ] Create, edit, delete invoices with payment deadline and status
-- [ ] Create, edit, delete expense receipts with category
-- [ ] Enter or CSV-import bank statement transactions
-- [ ] Auto-match engine: exact amount + date ±3 days → creates a match
-- [ ] Reconciliation view: matched pairs / unmatched invoices / unmatched bank rows
-- [ ] Manual match override by the user
-- [ ] CSV export of the full reconciliation report
-- [ ] All pages render without login (demo-first)
-
-## Non-Goals (v1)
-- Bank feed / open-banking API
-- Direct push to SQL accounting software
-- Multi-currency conversion
-- Invoice approval workflow
-- Multi-tenant SaaS features
+## Out Of Active Scope
+- Bank statement import
+- Bank reconciliation
+- Bank balance calculation
+- Official accounting ledger
+- SQL Accounting posting
+- OCR or AI invoice extraction
+- Personal expenses and credit-card claims
 
 ## Success Criteria
-**Pass:** User enters 5 invoices, 5 receipts, and imports a 10-row bank statement. The auto-match engine links the correct pairs, the reconciliation view shows the 2 unmatched rows, the user manually resolves one, and exports a CSV — all in under 5 minutes. No data loss on refresh.
+User can maintain suppliers, import or create recurring obligations, create supplier bills with supporting documents, prepare payment vouchers, track missing evidence, and keep audit-ready payment records without using the app for official bank reconciliation.
