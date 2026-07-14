@@ -3,6 +3,19 @@ import { NextResponse } from "next/server";
 
 export async function requireBankAccess(entityId?: string, capability: "import" | "reconcile" | "read" = "read") {
   const supabase = await createClient();
+  if (process.env.BANK_RECONCILIATION_ACTIVE !== "true") {
+    return {
+      supabase,
+      user: null,
+      profile: null,
+      canViewBalances: false,
+      error: NextResponse.json(
+        { error: "Feature inactive - bank reconciliation is handled in SQL Accounting." },
+        { status: 410 },
+      ),
+    };
+  }
+
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) return { supabase, user: null, profile: null, canViewBalances: false, error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
