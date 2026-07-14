@@ -1,38 +1,29 @@
 # Agentic Layer
 
-## Risk Classification
+Bank reconciliation and official accounting records are maintained in SQL Accounting. This application supports expense administration, payment preparation and supporting-document control.
 
-### Low — auto-execute (no approval)
-- Tag an invoice as overdue when `due_date < today` and `status = 'unpaid'` (nightly rule)
-- Generate reconciliation summary statistics (matched %, unmatched MYR total)
-- Produce draft CSV export
+## Allowed Automation
 
-### Medium — show draft, user clicks Confirm
-- `suggest_fuzzy_match`: AI proposes a match pairing → displayed as a suggestion card → user clicks Accept or Reject
-- `mark_invoice_paid`: triggered after a match is accepted → updates `invoices.status` → user sees change immediately, can undo within the session
+### Low Risk
+- Show missing-document counts.
+- Generate monthly recurring draft bills when required fields are complete.
+- Produce payment voucher print views.
 
-### High — always requires explicit approval
-- Bulk-import bank statement rows (user must confirm row count before insert)
-- Override an already-accepted match (audit trail required)
+### Medium Risk
+- Create draft payment vouchers from existing supplier bills.
+- Import suppliers and recurring obligations after preview, validation and user confirmation.
 
-### Critical — human only (no agent path)
-- Delete any invoice, receipt, or bank transaction
-- Purge a reconciliation period
+### High Risk
+- Issue a final payment voucher number.
+- Archive or restore supporting documents.
+- Revert confirmed import batches where safe.
 
-## Named Tools (approved list)
-| Tool | Risk | Description |
-|---|---|---|
-| `run_auto_match` | Low | Deterministic match engine; reads + inserts |
-| `suggest_fuzzy_match` | Medium | AI candidate proposal; writes suggestion only |
-| `export_reconciliation_csv` | Low | Streams CSV from DB; read-only |
-| `mark_invoice_paid` | Medium | Updates one status field |
-| `log_audit_event` | Low | Appends to audit_logs |
+## Explicitly Disabled
+- Bank statement import
+- Bank reconciliation matching
+- Bank balance calculation
+- Automatic posting to SQL Accounting
 
-No `run_any_sql`, no `send_any_email`, no raw file-system access.
+## Audit Log
 
-## Audit Log Fields
-`action`, `entity_type`, `entity_id`, `payload` (before/after), `user_id`, `created_at`
-
-## v1 vs Later
-**v1:** `run_auto_match` + `export_reconciliation_csv` only. 
-**Later:** `suggest_fuzzy_match` in Sprint 4; email reminders in a post-v1 sprint.
+Important user actions should continue writing audit log entries, especially imports, voucher issue/cancellation, document archive/restore, and demo-data actions.
