@@ -7,7 +7,7 @@ export default function LoginPage() {
   const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("Sign in to Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness.");
+  const [message, setMessage] = useState("Sign in for expense administration, payment preparation and supporting-document control.");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -79,11 +79,9 @@ export default function LoginPage() {
         </div>
 
         <div className="panel">
-          <h2>Access Notes</h2>
-          <div className="mini">
-            <p>Only users with an active application profile can open the dashboard.</p>
-            <p>Owner access is required for company settings and bank balance records.</p>
-          </div>
+          <h2>Access</h2>
+          <p>Only active finance users with an application profile can access the dashboard.</p>
+          <p>Owner users can maintain settings and view all entities. Staff access is controlled by profile and entity assignment.</p>
         </div>
       </section>
     </main>
