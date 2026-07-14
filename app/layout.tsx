@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Internal Finance Operations Dashboard",
-  description: "Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness",
+  description: "Expense administration, payment preparation and supporting-document control",
 };
 
 export default function RootLayout({
