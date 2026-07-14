@@ -51,6 +51,8 @@ const headerMapping: Record<string, string> = {
   date: "transaction_date",
   transaction_date: "transaction_date",
   posting_date: "transaction_date",
+  post_date: "transaction_date",
+  posted_date: "transaction_date",
   txn_date: "transaction_date",
   trn_date: "transaction_date",
   value_date: "value_date",
@@ -59,20 +61,32 @@ const headerMapping: Record<string, string> = {
   transaction_time: "transaction_time",
   description: "description",
   transaction_description: "description",
+  transaction_details: "description",
   details: "description",
   particulars: "description",
+  narrative: "description",
   additional_description: "additional_description",
+  extra_description: "additional_description",
   reference: "reference_number",
+  ref: "reference_number",
+  ref_no: "reference_number",
+  reference_no: "reference_number",
   reference_number: "reference_number",
   document_number: "reference_number",
+  document_no: "reference_number",
   cheque_number: "reference_number",
+  cheque_no: "reference_number",
   debit: "debit",
+  debit_amount: "debit",
   withdrawal: "debit",
+  withdrawal_amount: "debit",
   withdrawals: "debit",
   payment: "debit",
   money_out: "debit",
   credit: "credit",
+  credit_amount: "credit",
   deposit: "credit",
+  deposit_amount: "credit",
   deposits: "credit",
   money_in: "credit",
   amount: "amount",
@@ -134,20 +148,34 @@ export function mapBankRows(rows: Record<string, string>[], mapping: BankMapping
 }
 
 export function normaliseMapped(mapped: Record<string, unknown>) {
-  const debit = parseMoney(mapped.debit);
-  const credit = parseMoney(mapped.credit);
-  let direction = String(mapped.direction ?? "").trim().toLowerCase();
-  let amount = parseMoney(mapped.amount);
+  const debitInfo = parseMoneyDetail(mapped.debit ?? mapped.source_debit_amount ?? mapped.debit_amount);
+  const creditInfo = parseMoneyDetail(mapped.credit ?? mapped.source_credit_amount ?? mapped.credit_amount);
+  const amountInfo = parseMoneyDetail(mapped.amount);
+  const reviewWarnings: string[] = [];
+  const debit = debitInfo.amount;
+  const credit = creditInfo.amount;
+  const debitPositive = debit != null && debit > 0;
+  const creditPositive = credit != null && credit > 0;
+  let direction = normaliseDirection(mapped.direction);
+  let amount = amountInfo.amount;
 
-  if (!direction && debit != null) direction = "debit";
-  if (!direction && credit != null) direction = "credit";
-  if (direction.includes("withdraw") || direction.includes("debit") || direction === "dr") direction = "debit";
-  if (direction.includes("deposit") || direction.includes("credit") || direction === "cr") direction = "credit";
-  if (amount == null && debit != null) amount = debit;
-  if (amount == null && credit != null) amount = credit;
-  if (amount != null && amount < 0) {
-    amount = Math.abs(amount);
-    if (!direction) direction = "debit";
+  if (debitInfo.isNegative || creditInfo.isNegative || amountInfo.isNegative) {
+    reviewWarnings.push("Negative amount normalised to positive; review the bank format.");
+  }
+
+  if (!direction && debitPositive && !creditPositive) direction = "debit";
+  if (!direction && creditPositive && !debitPositive) direction = "credit";
+  if (debitPositive && creditPositive) {
+    reviewWarnings.push(direction
+      ? "Both debit and credit are populated; selected direction will be used."
+      : "Both debit and credit are populated; choose a direction or exclude the row.");
+  }
+
+  if (amount == null) {
+    if (direction === "debit" && debitPositive) amount = debit;
+    if (direction === "credit" && creditPositive) amount = credit;
+    if (!direction && debitPositive && !creditPositive) amount = debit;
+    if (!direction && creditPositive && !debitPositive) amount = credit;
   }
 
   return {
@@ -158,10 +186,13 @@ export function normaliseMapped(mapped: Record<string, unknown>) {
     additional_description: String(mapped.additional_description ?? "").trim(),
     reference_number: String(mapped.reference_number ?? "").trim(),
     direction,
+    source_debit_amount: debit,
+    source_credit_amount: credit,
     debit_amount: direction === "debit" ? amount : null,
     credit_amount: direction === "credit" ? amount : null,
     amount,
     running_balance: parseMoney(mapped.running_balance),
+    review_warnings: reviewWarnings,
   };
 }
 
@@ -204,12 +235,16 @@ export function makeFingerprint(bankAccountId: string, mapped: Record<string, un
 }
 
 export function parseMoney(value: unknown) {
+  return parseMoneyDetail(value).amount;
+}
+
+function parseMoneyDetail(value: unknown) {
   const text = String(value ?? "").trim();
-  if (!text) return null;
+  if (!text) return { amount: null, isNegative: false };
   const cleaned = text.replace(/rm/gi, "").replace(/,/g, "").replace(/[()]/g, (char) => char === "(" ? "-" : "").replace(/[^\d.-]/g, "");
-  if (!cleaned || cleaned === "-") return null;
+  if (!cleaned || cleaned === "-") return { amount: null, isNegative: false };
   const number = Number(cleaned);
-  return Number.isFinite(number) ? Math.abs(number) : null;
+  return Number.isFinite(number) ? { amount: Math.abs(number), isNegative: number < 0 } : { amount: null, isNegative: false };
 }
 
 export function parseFlexibleDate(value: unknown) {
@@ -236,8 +271,16 @@ function parseTime(value: unknown) {
 
 function shouldExcludeRow(original: Record<string, string>, mapped: Record<string, unknown>) {
   const joined = Object.values(original).join(" ").toLowerCase();
-  if (/opening balance|closing balance|total debit|total credit|available balance/.test(joined)) return true;
+  if (/opening balance|closing balance|balance brought forward|balance carried forward|brought forward|carried forward|total debit|total credit|available balance/.test(joined)) return true;
   return !mapped.transaction_date && !mapped.amount && !String(mapped.description ?? "").trim();
+}
+
+function normaliseDirection(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) return "";
+  if (text.includes("withdraw") || text.includes("payment") || text.includes("debit") || text === "dr" || text === "d") return "debit";
+  if (text.includes("deposit") || text.includes("credit") || text === "cr" || text === "c") return "credit";
+  return text;
 }
 
 function normaliseText(value: unknown) {
