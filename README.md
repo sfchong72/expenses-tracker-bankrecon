@@ -1,8 +1,8 @@
 # Internal Finance Operations Dashboard
 
-Supplier Bills, Student Payments, Bank Reconciliation & Audit Readiness.
+Expense administration, payment preparation and supporting-document control.
 
-This is an internal finance workspace for supplier bills, recurring obligations, payment vouchers, document evidence, student payment tracking, bank reconciliation, and audit preparation.
+Bank reconciliation and official accounting records are maintained in SQL Accounting. This application supports expense administration, payment preparation and supporting-document control.
 
 ## Stack
 
@@ -22,11 +22,12 @@ This is an internal finance workspace for supplier bills, recurring obligations,
 - Payment vouchers with entity/month numbering
 - Private supporting document uploads
 - Missing-document tracking
-- Bank reconciliation workspace
+- Dormant historical bank-import tables retained for audit continuity only
 
 ## Phase Notes
 
 - Phase 1 established the protected foundation, entities, roles, permissions, and settings.
 - Phase 2 adds supplier bills, recurring obligations, payment vouchers, private documents, and missing-document readiness checks.
+- Phase 3A bank import and reconciliation screens are inactive because SQL Accounting remains the official accounting and bank reconciliation system.
 
 Routes and deployment project names are intentionally unchanged for now.
