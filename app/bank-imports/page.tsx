@@ -96,15 +96,19 @@ export default function BankImportsPage() {
     void loadHistory();
   }
 
-  function applyMapping() {
-    setRows((current) => current.map((row) => {
-      const mapped: Row = {};
-      for (const [header, field] of Object.entries(mapping)) {
-        if (field) mapped[field] = row.original?.[header] ?? "";
-      }
-      return { ...row, mapped: { ...row.mapped, ...mapped } };
-    }));
-    setMessage("Mapping applied. Review validation and duplicate warnings before confirming.");
+  async function applyMapping() {
+    if (!rows.length) return;
+    setBusy(true);
+    const res = await fetch("/api/bank-imports/reprocess", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows, mapping, bankAccountId, entityId, statementMonth }),
+    });
+    const json = await res.json();
+    setBusy(false);
+    if (!res.ok) return setMessage(json.error || "Could not apply mapping.");
+    setRows(json.rows || []);
+    setMessage("Mapping applied. Dates, debit/credit direction and amounts were recalculated for the preview.");
   }
 
   function updateMapped(index: number, field: string, value: unknown) {
@@ -115,6 +119,8 @@ export default function BankImportsPage() {
     if (!batchId) return setMessage("No preview batch is ready.");
     const pending = rows.filter((row) => !row.excluded && row.duplicateWarnings?.length && row.duplicateDecision === "pending");
     if (pending.length) return setMessage("Resolve duplicate warnings before confirming.");
+    const critical = rows.filter(rowHasCriticalError);
+    if (critical.length) return setMessage(`Exclude or correct ${critical.length} row(s) with missing date, direction or amount before confirming.`);
     setBusy(true);
     const res = await fetch("/api/bank-imports/confirm", {
       method: "POST",
@@ -157,6 +163,8 @@ export default function BankImportsPage() {
   }
 
   const entityAccounts = accounts.filter((account) => account.entity_id === entityId);
+  const criticalCount = rows.filter(rowHasCriticalError).length;
+  const pendingDuplicateCount = rows.filter((row) => !row.excluded && row.duplicateWarnings?.length && row.duplicateDecision === "pending").length;
 
   return (
     <main className="page-shell">
@@ -215,27 +223,32 @@ export default function BankImportsPage() {
         <div className="mapping-grid">
           {headers.map((header) => <label key={header}>{header}<select value={mapping[header] || ""} onChange={(event) => setMapping({ ...mapping, [header]: event.target.value })}><option value="">Ignore</option>{fields.map((field) => <option key={field} value={field}>{field}</option>)}</select></label>)}
         </div>
-        <button onClick={applyMapping}>Apply Mapping</button>
+        <button onClick={() => void applyMapping()} disabled={busy}>Apply Mapping</button>
       </section>}
 
       {rows.length > 0 && <section className="panel">
         <div className="section-heading">
           <h2>Preview Rows</h2>
           <label className="inline-check"><input type="checkbox" checked={acknowledgeReview} onChange={(event) => setAcknowledgeReview(event.target.checked)} /> I understand incomplete or suspicious rows require later review</label>
-          <button className="primary" onClick={() => void confirmImport()} disabled={busy}>Confirm Import</button>
+          <button className="primary" onClick={() => void confirmImport()} disabled={busy || criticalCount > 0 || pendingDuplicateCount > 0}>Confirm Import</button>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Use</th><th>Date</th><th>Description</th><th>Direction</th><th>Amount</th><th>Reference</th><th>Warnings</th><th>Duplicate</th></tr></thead>
+        {criticalCount > 0 && <p className="error-text">{criticalCount} included row(s) still need a usable transaction date, direction and amount. Exclude or correct them before confirming.</p>}
+        {pendingDuplicateCount > 0 && <p className="error-text">{pendingDuplicateCount} duplicate warning(s) still need a decision.</p>}
+        <div className="table-wrap bank-preview-wrap">
+          <table className="bank-preview-table">
+            <thead><tr><th>Use</th><th>Transaction date</th><th>Value date</th><th>Description</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Direction</th><th>Amount</th><th>Warnings</th><th>Duplicate</th></tr></thead>
             <tbody>{rows.map((row, index) => (
-              <tr key={row.rowNumber}>
+              <tr key={row.rowNumber} className={row.excluded ? "muted-row" : rowHasCriticalError(row) ? "selected-row" : ""}>
                 <td><input type="checkbox" checked={!row.excluded} onChange={(event) => setRows((current) => current.map((item, i) => i === index ? { ...item, excluded: !event.target.checked } : item))} /></td>
                 <td><input value={row.mapped?.transaction_date || ""} onChange={(event) => updateMapped(index, "transaction_date", event.target.value)} /></td>
-                <td><input value={row.mapped?.description || ""} onChange={(event) => updateMapped(index, "description", event.target.value)} /></td>
+                <td><input value={row.mapped?.value_date || ""} onChange={(event) => updateMapped(index, "value_date", event.target.value)} /></td>
+                <td><textarea className="compact-textarea" value={row.mapped?.description || ""} onChange={(event) => updateMapped(index, "description", event.target.value)} /></td>
+                <td><input value={row.mapped?.reference_number || ""} onChange={(event) => updateMapped(index, "reference_number", event.target.value)} /></td>
+                <td><input value={row.mapped?.source_debit_amount ?? row.mapped?.debit_amount ?? ""} onChange={(event) => updateMapped(index, "debit", event.target.value)} /></td>
+                <td><input value={row.mapped?.source_credit_amount ?? row.mapped?.credit_amount ?? ""} onChange={(event) => updateMapped(index, "credit", event.target.value)} /></td>
                 <td><select value={row.mapped?.direction || ""} onChange={(event) => updateMapped(index, "direction", event.target.value)}><option value="">Choose</option><option value="debit">Debit</option><option value="credit">Credit</option></select></td>
                 <td><input value={row.mapped?.amount || row.mapped?.debit_amount || row.mapped?.credit_amount || ""} onChange={(event) => updateMapped(index, "amount", event.target.value)} /></td>
-                <td><input value={row.mapped?.reference_number || ""} onChange={(event) => updateMapped(index, "reference_number", event.target.value)} /></td>
-                <td>{[...(row.validationErrors || []), ...(row.duplicateWarnings || []).map((item: Row) => item.reason || item.type)].join("; ") || "OK"}</td>
+                <td><WarningBadges row={row} /></td>
                 <td><select value={row.duplicateDecision || "import_as_new"} onChange={(event) => setRows((current) => current.map((item, i) => i === index ? { ...item, duplicateDecision: event.target.value } : item))}><option value="import_as_new">Import as new</option><option value="skip">Skip</option><option value="review_manually">Review manually</option><option value="pending">Pending</option></select></td>
               </tr>
             ))}</tbody>
@@ -244,4 +257,38 @@ export default function BankImportsPage() {
       </section>}
     </main>
   );
+}
+
+function WarningBadges({ row }: { row: Row }) {
+  const critical = row.validationErrors || [];
+  const review = row.mapped?.review_warnings || [];
+  const duplicates = (row.duplicateWarnings || []).map((item: Row) => item.reason || item.type);
+  const warnings = [
+    ...critical.map((text: string) => ({ text, tone: "danger" })),
+    ...review.map((text: string) => ({ text, tone: "review" })),
+    ...duplicates.map((text: string) => ({ text, tone: "review" })),
+  ];
+  if (row.excluded) return <span className="status-pill">Excluded</span>;
+  if (!warnings.length) return <span className="status-pill status-paid">OK</span>;
+  return (
+    <div className="warning-stack">
+      {warnings.map((warning, index) => <span className={`warning-badge ${warning.tone}`} key={`${warning.text}-${index}`}>{warning.text}</span>)}
+    </div>
+  );
+}
+
+function rowHasCriticalError(row: Row) {
+  if (row.excluded) return false;
+  const mapped = row.mapped || {};
+  const amount = parseUiAmount(mapped.amount ?? mapped.debit_amount ?? mapped.credit_amount);
+  return !mapped.transaction_date
+    || !String(mapped.description ?? "").trim()
+    || !["debit", "credit"].includes(String(mapped.direction))
+    || amount <= 0;
+}
+
+function parseUiAmount(value: unknown) {
+  const cleaned = String(value ?? "").replace(/rm/gi, "").replace(/,/g, "").replace(/[()]/g, (char) => char === "(" ? "-" : "").replace(/[^\d.-]/g, "");
+  const number = Number(cleaned);
+  return Number.isFinite(number) ? Math.abs(number) : 0;
 }
