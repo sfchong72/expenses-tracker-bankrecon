@@ -10,6 +10,7 @@ const navItems = [
   { label: "Bills", href: "/bills" },
   { label: "Recurring", href: "/recurring" },
   { label: "Payment Vouchers", href: "/payment-vouchers" },
+  { label: "Claims", href: "/claims" },
   { label: "Documents", href: "/documents" },
   { label: "Missing Documents", href: "/missing-documents" },
   { label: "Settings", href: "/settings/foundation" },

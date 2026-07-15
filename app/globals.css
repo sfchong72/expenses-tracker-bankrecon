@@ -91,6 +91,8 @@ td button { margin-right: 6px; min-height: 32px; }
 .checkgrid { display: flex; gap: 12px; flex-wrap: wrap; }
 .itemrow { display: grid; grid-template-columns: 1.35fr 1fr 1fr .75fr auto; gap: 8px; margin-top: 10px; align-items: center; }
 .item-card { background: #fffaf0; border-color: #e2c88d; }
+.claim-line-card { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; border: 1px solid var(--line); background: #fffefb; border-radius: 8px; padding: 12px; margin-top: 12px; }
+.claim-line-card button { grid-column: 1 / -1; justify-self: start; }
 .mapping-grid { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .total-line { font-weight: 800; text-align: right; color: var(--purple-dark); }
 .status-pill { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: #eee; color: #333; text-transform: capitalize; }
@@ -146,7 +148,7 @@ code { white-space: pre-wrap; word-break: break-word; }
   main { padding: 18px; }
   header, .grid { display: block; }
   form, .preview-grid, .field-with-action { grid-template-columns: 1fr; }
-  .itemrow { grid-template-columns: 1fr; }
+  .itemrow, .claim-line-card { grid-template-columns: 1fr; }
   h1 { font-size: 28px; }
 }
 @media print {

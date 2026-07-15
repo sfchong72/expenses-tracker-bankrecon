@@ -6,8 +6,8 @@ export const runtime = "nodejs";
 
 const allowedTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const maxSize = 10 * 1024 * 1024;
-const validRecordTypes = new Set(["supplier_bill", "payment_voucher", "bill_payment", "bank_transaction", "recurring_obligation"]);
-const validDocumentTypes = new Set(["supplier_invoice", "receipt", "payment_slip", "payment_voucher", "quotation", "contract", "payroll_support", "other"]);
+const validRecordTypes = new Set(["supplier_bill", "payment_voucher", "bill_payment", "bank_transaction", "recurring_obligation", "claim", "claim_line", "claim_reimbursement"]);
+const validDocumentTypes = new Set(["supplier_invoice", "receipt", "payment_slip", "payment_voucher", "quotation", "contract", "payroll_support", "claim_receipt", "tax_invoice", "ticket", "booking_confirmation", "mileage_route_screenshot", "redacted_card_statement", "claim_payment_proof", "other"]);
 
 function cleanName(name: string) { return name.replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 140) || "document"; }
 function extension(mime: string) { if (mime === "application/pdf") return "pdf"; if (mime === "image/png") return "png"; return "jpg"; }
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   if (!validRecordTypes.has(linkedRecordType) || !validDocumentTypes.has(documentType)) return NextResponse.json({ error: "Unsupported document link or type" }, { status: 400 });
   if (!allowedTypes.has(file.type)) return NextResponse.json({ error: "Only PDF, JPG, JPEG and PNG files are allowed" }, { status: 400 });
   if (file.size > maxSize) return NextResponse.json({ error: "Maximum file size is 10 MB" }, { status: 400 });
-  const tableName = linkedRecordType === "supplier_bill" ? "supplier_bills" : linkedRecordType === "payment_voucher" ? "payment_vouchers" : linkedRecordType === "bill_payment" ? "bill_payments" : linkedRecordType === "recurring_obligation" ? "recurring_obligations" : "bank_transactions";
+  const tableName = linkedRecordType === "supplier_bill" ? "supplier_bills" : linkedRecordType === "payment_voucher" ? "payment_vouchers" : linkedRecordType === "bill_payment" ? "bill_payments" : linkedRecordType === "recurring_obligation" ? "recurring_obligations" : linkedRecordType === "claim" ? "claims" : linkedRecordType === "claim_line" ? "claim_lines" : linkedRecordType === "claim_reimbursement" ? "claim_reimbursements" : "bank_transactions";
   const linked = await supabase.from(tableName).select("id, entity_id").eq("id", linkedRecordId).maybeSingle();
   if (linked.error || !linked.data) return NextResponse.json({ error: "The selected linked record no longer exists." }, { status: 400 });
   if (linked.data.entity_id && linked.data.entity_id !== entityId) return NextResponse.json({ error: "The selected record does not belong to the selected entity." }, { status: 400 });

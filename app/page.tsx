@@ -81,6 +81,7 @@ export default function Home() {
         <Panel title="Payment Preparation">
           <QuickLink href="/bills" title="Supplier Bills" detail={`${dueSoon.length} due within 3 days, ${overdue.length} overdue`} />
           <QuickLink href="/payment-vouchers" title="Payment Vouchers" detail={`${vouchers.length} vouchers, ${draftVouchers.length} drafts to review`} />
+          <QuickLink href="/claims" title="Staff & Director Claims" detail="Cash, travel and credit-card reimbursement preparation" />
           <QuickLink href="/recurring" title="Recurring Obligations" detail={`${recurring.filter((row) => row.active_status).length} active monthly obligations`} />
         </Panel>
 
@@ -101,6 +102,7 @@ export default function Home() {
               <tr><td>Supplier Bills</td><td>{bills.length} current records</td><td><Link href="/bills">Create bills and attach invoices</Link></td></tr>
               <tr><td>Recurring Obligations</td><td>{recurring.length} configured</td><td><Link href="/recurring">Generate monthly drafts</Link></td></tr>
               <tr><td>Payment Vouchers</td><td>{vouchers.length} prepared</td><td><Link href="/payment-vouchers">Issue or print vouchers</Link></td></tr>
+              <tr><td>Staff & Director Claims</td><td>Release 1 finance/admin entry</td><td><Link href="/claims">Create claims and reimbursement vouchers</Link></td></tr>
               <tr><td>SQL Accounting</td><td>Official accounting and bank reconciliation system</td><td>Record final accounting entries there</td></tr>
             </tbody>
           </table>
