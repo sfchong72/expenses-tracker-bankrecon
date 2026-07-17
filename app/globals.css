@@ -93,6 +93,15 @@ td button { margin-right: 6px; min-height: 32px; }
 .item-card { background: #fffaf0; border-color: #e2c88d; }
 .claim-line-card { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; border: 1px solid var(--line); background: #fffefb; border-radius: 8px; padding: 12px; margin-top: 12px; }
 .claim-line-card button { grid-column: 1 / -1; justify-self: start; }
+.claim-editor-panel > .section-heading { align-items: flex-start; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.claim-editor-panel > .section-heading h2 { border: 0; padding: 0; margin: 0 0 6px; }
+.save-indicator { margin: 0; font-size: 13px; font-weight: 800; color: var(--muted); }
+.save-unsaved, .save-error { color: var(--danger); }
+.save-saving { color: var(--purple-dark); }
+.save-saved { color: #2b6a38; }
+.sticky-action-bar { position: sticky; bottom: 0; z-index: 12; margin: 18px -18px -18px; padding: 12px 18px; border-top: 1px solid var(--line); background: rgba(255, 253, 249, .96); backdrop-filter: blur(10px); display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; border-radius: 0 0 10px 10px; }
+.sticky-action-bar span { font-size: 13px; font-weight: 800; color: var(--muted); }
+.calculated-field { background: #f8f3e8; color: #463915; font-weight: 800; }
 .mapping-grid { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .total-line { font-weight: 800; text-align: right; color: var(--purple-dark); }
 .status-pill { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: #eee; color: #333; text-transform: capitalize; }

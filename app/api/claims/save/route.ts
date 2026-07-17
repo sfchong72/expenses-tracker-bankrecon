@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 type ClaimLineInput = Record<string, unknown> & { client_key?: string };
 type AdvanceInput = Record<string, unknown>;
+type ValidationIssue = { key: string; field: string; message: string };
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -14,6 +15,8 @@ export async function POST(request: Request) {
   const claim = body.claim as Record<string, unknown>;
   const lines = (body.lines ?? []) as ClaimLineInput[];
   const advances = (body.advances ?? []) as AdvanceInput[];
+  const deletedLineIds = ((body.deletedLineIds ?? []) as unknown[]).map(cleanUuid).filter(Boolean) as string[];
+  const deletedAdvanceIds = ((body.deletedAdvanceIds ?? []) as unknown[]).map(cleanUuid).filter(Boolean) as string[];
 
   if (!claim?.entity_id || !claim.claimant_name || !claim.claim_mode || !claim.claim_type) {
     return NextResponse.json({ error: "Entity, claimant, mode and claim type are required" }, { status: 400 });
@@ -41,44 +44,64 @@ export async function POST(request: Request) {
     is_demo: false,
   };
 
-  const saved = claim.id
-    ? await supabase.from("claims").update({ ...claimPayload, created_by: undefined }).eq("id", claim.id).select("id").single()
+  const validation = validateLines(lines);
+  if (validation.length) {
+    return NextResponse.json({ error: "Please fix the highlighted claim line fields before saving.", fieldErrors: validation }, { status: 400 });
+  }
+
+  const { created_by: _createdBy, ...claimUpdatePayload } = claimPayload;
+  const claimIdInput = cleanUuid(claim.id);
+  const saved = claimIdInput
+    ? await supabase.from("claims").update(claimUpdatePayload).eq("id", claimIdInput).select("id").single()
     : await supabase.from("claims").insert(claimPayload).select("id").single();
   if (saved.error) return NextResponse.json({ error: saved.error.message }, { status: 400 });
 
   const claimId = saved.data.id;
 
-  if (claim.id) {
-    const existingLines = await supabase.from("claim_lines").select("id").eq("claim_id", claimId);
-    if (existingLines.error) return NextResponse.json({ error: existingLines.error.message }, { status: 400 });
-    const lineIds = (existingLines.data ?? []).map((row) => row.id);
-    if (lineIds.length) {
-      const linked = await supabase.from("document_links").select("linked_record_id").eq("linked_record_type", "claim_line").in("linked_record_id", lineIds).limit(1);
-      if (linked.data?.length) return NextResponse.json({ error: "This claim has line documents. Open a new revision instead of replacing existing lines." }, { status: 409 });
-    }
-    await supabase.from("claim_lines").delete().eq("claim_id", claimId);
-    await supabase.from("claim_advances").delete().eq("claim_id", claimId);
+  if (claimIdInput && deletedLineIds.length) {
+    const linked = await supabase.from("document_links").select("linked_record_id").eq("linked_record_type", "claim_line").in("linked_record_id", deletedLineIds).limit(1);
+    if (linked.error) return NextResponse.json({ error: linked.error.message }, { status: 400 });
+    if (linked.data?.length) return NextResponse.json({ error: "A removed claim line has linked evidence. Remove or re-link the evidence before deleting that line." }, { status: 409 });
+    const deleted = await supabase.from("claim_lines").delete().eq("claim_id", claimId).in("id", deletedLineIds);
+    if (deleted.error) return NextResponse.json({ error: deleted.error.message }, { status: 400 });
   }
 
-  const lineRows = lines.map((line, index) => buildLine(claimId, String(claim.entity_id), line, index));
-  const lineResult = await supabase.from("claim_lines").insert(lineRows).select("id, client_key");
-  if (lineResult.error) return NextResponse.json({ error: lineResult.error.message }, { status: 400 });
+  if (claimIdInput && deletedAdvanceIds.length) {
+    const deleted = await supabase.from("claim_advances").delete().eq("claim_id", claimId).in("id", deletedAdvanceIds);
+    if (deleted.error) return NextResponse.json({ error: deleted.error.message }, { status: 400 });
+  }
+
+  const savedLines = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineRow = buildLine(claimId, String(claim.entity_id), line, index);
+    const lineId = cleanUuid(line.id);
+    const result = lineId
+      ? await supabase.from("claim_lines").update(lineRow).eq("id", lineId).eq("claim_id", claimId).select("id, client_key").single()
+      : await supabase.from("claim_lines").insert(lineRow).select("id, client_key").single();
+    if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
+    savedLines.push(result.data);
+  }
 
   const advanceRows = advances
     .filter((advance) => Number(parseAmount(advance.advance_amount) ?? 0) > 0)
     .map((advance) => ({
+      id: cleanUuid(advance.id),
       claim_id: claimId,
       entity_id: String(claim.entity_id),
       advance_amount: Number(parseAmount(advance.advance_amount) ?? 0),
       advance_date: parseDate(advance.advance_date),
       advance_reference: cleanText(advance.advance_reference),
-      amount_utilised: Number(parseAmount(advance.amount_utilised) ?? parseAmount(advance.advance_amount) ?? 0),
+      amount_utilised: Number(parseAmount(advance.advance_amount) ?? 0),
       remarks: cleanText(advance.remarks),
       created_by: userData.user.id,
     }));
-  if (advanceRows.length) {
-    const advanceResult = await supabase.from("claim_advances").insert(advanceRows);
-    if (advanceResult.error) return NextResponse.json({ error: advanceResult.error.message }, { status: 400 });
+  for (const advanceRow of advanceRows) {
+    const { id, ...row } = advanceRow;
+    const result = id
+      ? await supabase.from("claim_advances").update(row).eq("id", id).eq("claim_id", claimId)
+      : await supabase.from("claim_advances").insert(row);
+    if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
   }
 
   await supabase.rpc("recalculate_claim_totals", { p_claim_id: claimId });
@@ -92,14 +115,17 @@ export async function POST(request: Request) {
   });
 
   const refreshed = await supabase.from("claims").select("*").eq("id", claimId).single();
-  return NextResponse.json({ claim: refreshed.data, lines: lineResult.data ?? [] });
+  return NextResponse.json({ claim: refreshed.data, lines: savedLines });
 }
 
 function buildLine(claimId: string, entityId: string, line: ClaimLineInput, index: number) {
-  const amount = Number(parseAmount(line.amount) ?? 0);
+  const lineType = cleanText(line.line_type) || "miscellaneous";
+  const distance = Number(parseAmount(line.distance_km) ?? 0);
+  const mileageRate = Number(parseAmount(line.mileage_rate) ?? 0);
+  const mileageAmount = lineType === "mileage" ? roundMoney(distance * mileageRate) : 0;
+  const amount = lineType === "mileage" ? mileageAmount : Number(parseAmount(line.amount) ?? 0);
   const exchange = Number(parseAmount(line.exchange_rate) ?? 1) || 1;
   const converted = Number(parseAmount(line.myr_converted_amount) ?? amount * exchange);
-  const lineType = cleanText(line.line_type) || "miscellaneous";
   const warnings = validationWarnings(line);
   const mappedForFingerprint = {
     card_last_four: line.card_last_four,
@@ -120,8 +146,9 @@ function buildLine(claimId: string, entityId: string, line: ClaimLineInput, inde
     from_location: cleanText(line.from_location),
     to_location: cleanText(line.to_location),
     transport_mode: cleanText(line.transport_mode),
-    distance_km: Number(parseAmount(line.distance_km) ?? 0) || null,
-    mileage_rate: Number(parseAmount(line.mileage_rate) ?? 0) || null,
+    distance_km: distance || null,
+    mileage_rate: mileageRate || null,
+    mileage_amount_calculated: mileageAmount || null,
     check_in_date: parseDate(line.check_in_date),
     check_out_date: parseDate(line.check_out_date),
     number_of_nights: line.number_of_nights ? Number(line.number_of_nights) : null,
@@ -151,6 +178,30 @@ function buildLine(claimId: string, entityId: string, line: ClaimLineInput, inde
   };
 }
 
+function validateLines(lines: ClaimLineInput[]) {
+  const issues: ValidationIssue[] = [];
+  lines.forEach((line, index) => {
+    const key = cleanText(line.client_key) || `line-${index}`;
+    const lineType = cleanText(line.line_type) || "miscellaneous";
+    const distance = Number(parseAmount(line.distance_km) ?? 0);
+    const mileageRate = Number(parseAmount(line.mileage_rate) ?? 0);
+    const amount = lineType === "mileage" ? distance * mileageRate : Number(parseAmount(line.amount) ?? 0);
+    const description = cleanText(line.description || line.transaction_description || line.merchant_or_supplier);
+    if (!description) issues.push({ key, field: "description", message: "Description is required." });
+    if (lineType === "mileage") {
+      if (distance <= 0) issues.push({ key, field: "distance_km", message: "Distance is required for mileage." });
+      if (mileageRate <= 0) issues.push({ key, field: "mileage_rate", message: "Mileage rate is required." });
+    }
+    if (amount <= 0) issues.push({ key, field: "amount", message: "Amount must be greater than zero." });
+    const checkIn = parseDate(line.check_in_date);
+    const checkOut = parseDate(line.check_out_date);
+    if (lineType === "accommodation" && checkIn && checkOut && checkOut < checkIn) {
+      issues.push({ key, field: "check_out_date", message: "Check-out date cannot be before check-in date." });
+    }
+  });
+  return issues;
+}
+
 function validationWarnings(line: ClaimLineInput) {
   const warnings: string[] = [];
   const expenseDate = parseDate(line.expense_date || line.transaction_date);
@@ -177,4 +228,8 @@ function monthStart(value: unknown) {
   const parsed = parseDate(value);
   if (!parsed) return null;
   return `${parsed.slice(0, 7)}-01`;
+}
+
+function roundMoney(value: number) {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 }
