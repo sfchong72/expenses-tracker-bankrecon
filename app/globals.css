@@ -51,6 +51,8 @@ textarea { min-height: 82px; grid-column: 1 / -1; }
 label { display: grid; gap: 6px; color: #56515b; font-size: 13px; font-weight: 700; }
 form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 form button { grid-column: 1 / -1; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 0; }
+legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .wide { grid-column: 1 / -1; }
 .inline { display: inline-flex; align-items: center; gap: 7px; width: auto; font-weight: 700; }
 .inline input { width: auto; }
@@ -140,6 +142,9 @@ td button { margin-right: 6px; min-height: 32px; }
 .metric-grid span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; font-weight: 800; margin-bottom: 5px; }
 .metric-grid strong { font-size: 20px; }
 .inline-card { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 8px; padding: 10px; display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 10px; align-items: center; margin-bottom: 8px; }
+.workflow-list { margin: 0; padding: 0; display: grid; gap: 10px; list-style: none; }
+.workflow-list li { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 8px; padding: 11px; display: grid; gap: 4px; }
+.workflow-list span { color: var(--muted); }
 .selected-row td { background: #fff1f7 !important; }
 .empty-state { color: var(--muted); border: 1px solid var(--line); background: var(--surface-soft); border-radius: 8px; padding: 14px; }
 code { white-space: pre-wrap; word-break: break-word; }
