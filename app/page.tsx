@@ -92,6 +92,22 @@ export default function Home() {
         </Panel>
       </section>
 
+      <section className="split-grid">
+        <Panel title="Staff Trial">
+          <QuickLink href="/settings/users" title="Staff Access" detail="Create a separate tester login, assign role, entities and document permissions" />
+          <QuickLink href="/uat" title="UAT Checklist & Feedback" detail="Give testers a guided path and collect remarks in one place" />
+        </Panel>
+
+        <Panel title="Normal Workflow">
+          <ol className="workflow-list">
+            <li><strong>Maintain suppliers</strong><span>Create payees and assign them to IEA, IETA, PLC or KALER.</span></li>
+            <li><strong>Capture bills or claims</strong><span>Attach invoice, receipt or phone photo while creating the record.</span></li>
+            <li><strong>Prepare vouchers</strong><span>Review drafts, issue numbers only when final, then print/save PDF.</span></li>
+            <li><strong>Check audit gaps</strong><span>Use Missing Documents before entering final records in SQL Accounting.</span></li>
+          </ol>
+        </Panel>
+      </section>
+
       <section className="panel">
         <h2>Workspace Status</h2>
         <div className="table-wrap">
@@ -103,6 +119,7 @@ export default function Home() {
               <tr><td>Recurring Obligations</td><td>{recurring.length} configured</td><td><Link href="/recurring">Generate monthly drafts</Link></td></tr>
               <tr><td>Payment Vouchers</td><td>{vouchers.length} prepared</td><td><Link href="/payment-vouchers">Issue or print vouchers</Link></td></tr>
               <tr><td>Staff & Director Claims</td><td>Release 1 finance/admin entry</td><td><Link href="/claims">Create claims and reimbursement vouchers</Link></td></tr>
+              <tr><td>Staff Trial Feedback</td><td>Ready for controlled testing</td><td><Link href="/uat">Open UAT checklist</Link></td></tr>
               <tr><td>SQL Accounting</td><td>Official accounting and bank reconciliation system</td><td>Record final accounting entries there</td></tr>
             </tbody>
           </table>
