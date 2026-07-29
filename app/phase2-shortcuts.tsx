@@ -13,6 +13,8 @@ const navItems = [
   { label: "Claims", href: "/claims" },
   { label: "Documents", href: "/documents" },
   { label: "Missing Documents", href: "/missing-documents" },
+  { label: "UAT Feedback", href: "/uat" },
+  { label: "Staff Access", href: "/settings/users" },
   { label: "Settings", href: "/settings/foundation" },
 ];
 
