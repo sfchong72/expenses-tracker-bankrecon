@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "Expense administration, payment preparation and supporting-document control",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: {
