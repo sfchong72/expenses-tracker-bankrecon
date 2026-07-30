@@ -26,6 +26,10 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px; }
 .brand-lockup strong { font-size: 16px; letter-spacing: .02em; }
 .brand-lockup span { color: var(--muted); font-size: 12px; }
 .shortcutbar { max-width: 1280px; margin: 0 auto; padding: 10px 24px 14px; display: flex; gap: 8px; overflow-x: auto; }
+.shortcutbar.grouped { align-items: stretch; gap: 10px; }
+.nav-group { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 10px; padding: 8px; display: grid; gap: 7px; min-width: max-content; }
+.nav-group > span { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+.nav-group > div { display: flex; gap: 6px; flex-wrap: nowrap; }
 .shortcutbar a, .button, nav a { min-height: 36px; border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 13px; white-space: nowrap; border-radius: 8px; }
 .shortcutbar a.active { background: var(--purple); border-color: var(--purple); color: #fff; box-shadow: 0 6px 18px rgba(111, 74, 142, .18); }
 
