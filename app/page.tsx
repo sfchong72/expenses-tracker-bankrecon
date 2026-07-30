@@ -58,9 +58,9 @@ export default function Home() {
     <main className="page-shell">
       <div className="page-header">
         <div>
-          <p className="eyebrow">Finance Operations</p>
-          <h1>Internal Finance Operations Dashboard</h1>
-          <p className="subtitle">Expense administration, payment preparation and supporting-document control.</p>
+          <p className="eyebrow">Inter-Excel Operations Hub</p>
+          <h1>Inter-Excel Operations Hub</h1>
+          <p className="subtitle">Finance Operations and Student Operations in one internal workspace. SQL Accounting remains the official accounting and bank reconciliation system.</p>
         </div>
         <AuthBar />
       </div>
@@ -85,14 +85,19 @@ export default function Home() {
           <QuickLink href="/recurring" title="Recurring Obligations" detail={`${recurring.filter((row) => row.active_status).length} active monthly obligations`} />
         </Panel>
 
+        <Panel title="Student Operations">
+          <QuickLink href="/student-operations" title="Student Dashboard" detail="Stage 1A workspace for student master, programmes, intakes and enrolments" />
+          <QuickLink href="/students" title="Students" detail="Create one master profile per student with protected identity fields" />
+          <QuickLink href="/enrolments" title="Enrolments" detail="Record branch, intake, programme and counsellor participation" />
+        </Panel>
+      </section>
+
+      <section className="split-grid">
         <Panel title="Audit Evidence">
           <QuickLink href="/documents" title="Supporting Documents" detail={`${documents.length} private documents stored`} />
           <QuickLink href="/missing-documents" title="Missing Documents" detail={`${missingEvidence.length} records need evidence review`} />
           <QuickLink href="/settings/categories" title="Expense Categories" detail={`${categories.length} active categories`} />
         </Panel>
-      </section>
-
-      <section className="split-grid">
         <Panel title="Staff Trial">
           <QuickLink href="/settings/users" title="Staff Access" detail="Create a separate tester login, assign role, entities and document permissions" />
           <QuickLink href="/uat" title="UAT Checklist & Feedback" detail="Give testers a guided path and collect remarks in one place" />
