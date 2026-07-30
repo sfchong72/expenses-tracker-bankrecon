@@ -3,8 +3,8 @@ import { Phase2Shortcuts } from "@/app/phase2-shortcuts";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Internal Finance Operations Dashboard",
-  description: "Expense administration, payment preparation and supporting-document control",
+  title: "Inter-Excel Operations Hub",
+  description: "Finance Operations and Student Operations for internal administration, payment preparation and supporting-document control",
 };
 
 export const dynamic = "force-dynamic";
