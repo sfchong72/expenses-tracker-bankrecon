@@ -673,7 +673,16 @@ with check (
 
 drop policy if exists "programmes_scoped_select" on programmes;
 create policy "programmes_scoped_select" on programmes for select to authenticated
-using (app_private.user_can_access_entity(entity_id) or app_private.current_user_can('can_manage_programmes'));
+using (
+  app_private.user_can_access_entity(entity_id)
+  or exists (
+    select 1
+    from user_branch_access uba
+    where uba.user_id = auth.uid()
+      and uba.entity_id = programmes.entity_id
+      and uba.active_status = true
+  )
+);
 drop policy if exists "programmes_manage" on programmes;
 create policy "programmes_manage" on programmes for all to authenticated
 using (app_private.current_user_can('can_manage_programmes') and app_private.user_can_access_entity(entity_id))
