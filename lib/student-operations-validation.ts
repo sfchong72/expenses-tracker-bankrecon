@@ -113,6 +113,15 @@ export function databaseFieldErrors(
   if (operation === "enrolment" && message.includes("enrolments_entity_id_enrolment_number_key")) {
     return { intake_id: "The enrolment number could not be reserved. Please save again." };
   }
+  if (operation === "enrolment" && message.includes("sequence_year") && message.includes("ambiguous")) {
+    return { intake_id: "The enrolment number could not be generated for this intake. Apply migration 0018 and save again." };
+  }
+  if (operation === "enrolment" && (message.includes("unknown entity, branch, programme or intake") || message.includes("programme or intake"))) {
+    return { intake_id: "Please select an intake belonging to the chosen programme." };
+  }
+  if (operation === "enrolment" && (error?.code === "42501" || message.includes("not authorised") || message.includes("row-level security"))) {
+    return { branch_id: "You do not have permission to create enrolments for this branch." };
+  }
   return {};
 }
 
