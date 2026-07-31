@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   ValidationError,
+  databaseFieldErrors,
+  fieldValidation,
   friendlyDatabaseError,
   integerOrNull,
   optionalUuid,
   requiredUuid,
   textOrNull,
+  throwFieldErrors,
+  uuidOrNull,
+  validationResponse,
 } from "@/lib/student-operations-validation";
 
 type IntakePayload = {
@@ -24,6 +29,7 @@ type IntakePayload = {
   status?: string;
   completion_timing?: string;
   completion_reason?: string;
+  save_action?: "draft" | "continue";
   remarks?: string;
 };
 
@@ -35,13 +41,10 @@ export async function POST(request: Request) {
   const { data: userData } = await db.auth.getUser();
   const user = userData.user;
 
-  if (!user) return NextResponse.json({ error: "Please log in first." }, { status: 401 });
+  if (!user) return NextResponse.json({ error: "Please log in first.", field_errors: {} }, { status: 401 });
 
   try {
     const body = (await request.json()) as IntakePayload;
-    const existingId = optionalUuid(body.id, "Please open a valid intake record.");
-    const programmeId = requiredUuid(body.programme_id, "Please select a programme.");
-    const branchId = requiredUuid(body.branch_id, "Please select a valid branch.");
     const code = textOrNull(body.intake_code)?.toUpperCase();
     const startDate = textOrNull(body.start_date);
     const submittedOriginalExpectedDate = textOrNull(body.original_expected_completion_date);
@@ -49,36 +52,70 @@ export async function POST(request: Request) {
     const closingDate = textOrNull(body.application_closing_date);
     const actualDate = textOrNull(body.actual_completion_date);
     const capacity = integerOrNull(body.capacity);
-    const status = textOrNull(body.status) || "open";
+    const submittedStatus = textOrNull(body.status) || "planning";
+    const status = body.save_action === "draft" ? "planning" : submittedStatus;
     const completionTiming = textOrNull(body.completion_timing) || "not_applicable";
     const completionReason = textOrNull(body.completion_reason);
+    const fieldErrors: Record<string, string> = {};
 
-    if (!code) throw new ValidationError("Please enter an intake code.");
-    if (!startDate) throw new ValidationError("Please select an intake start date.");
-    if (expectedDate && expectedDate < startDate) throw new ValidationError("Current expected completion date cannot be before the start date.");
-    if (closingDate && closingDate > startDate) throw new ValidationError("Application closing date cannot be after the start date.");
-    if (actualDate && actualDate < startDate) throw new ValidationError("Actual completion date cannot be before the start date.");
-    if (body.capacity !== "" && body.capacity != null && (capacity === null || capacity < 0)) {
-      throw new ValidationError("Capacity must be a whole number of zero or more.");
+    if (!uuidOrNull(body.programme_id)) fieldErrors.programme_id = "Please select a programme.";
+    if (!uuidOrNull(body.branch_id)) fieldErrors.branch_id = "Please select a branch.";
+    if (textOrNull(body.id) && !uuidOrNull(body.id)) fieldErrors.id = "Please open a valid intake record.";
+    if (!code) fieldErrors.intake_code = "Please enter an intake code.";
+    if (!OPERATIONAL_STATUSES.includes(status)) fieldErrors.status = "Please select a valid operational status.";
+    if (!COMPLETION_TIMINGS.includes(completionTiming)) {
+      fieldErrors.completion_timing = "Please select a valid completion timing.";
     }
-    if (!OPERATIONAL_STATUSES.includes(status)) throw new ValidationError("Please select a valid operational status.");
-    if (!COMPLETION_TIMINGS.includes(completionTiming)) throw new ValidationError("Please select a valid completion timing.");
+    if (status !== "planning" && !startDate) {
+      fieldErrors.start_date = "Please select a start date before activating this intake.";
+    }
+    if (!startDate && (expectedDate || closingDate || actualDate)) {
+      fieldErrors.start_date = "Please select a start date before adding scheduling dates.";
+    }
+    if (startDate && expectedDate && expectedDate < startDate) {
+      fieldErrors.expected_completion_date = "Current expected completion date cannot be before the start date.";
+    }
+    if (startDate && closingDate && closingDate > startDate) {
+      fieldErrors.application_closing_date = "Application closing date cannot be after the start date.";
+    }
+    if (startDate && actualDate && actualDate < startDate) {
+      fieldErrors.actual_completion_date = "Actual completion date cannot be before the start date.";
+    }
+    if (body.capacity !== "" && body.capacity != null && (capacity === null || capacity < 0)) {
+      fieldErrors.capacity = "Capacity must be a whole number of zero or more.";
+    }
+    throwFieldErrors(fieldErrors);
+
+    const existingId = optionalUuid(body.id, "Please open a valid intake record.", "id");
+    const programmeId = requiredUuid(body.programme_id, "Please select a programme.", "programme_id");
+    const branchId = requiredUuid(body.branch_id, "Please select a branch.", "branch_id");
 
     const [programmeRes, branchRes] = await Promise.all([
-      db.from("programmes").select("id, entity_id").eq("id", programmeId).maybeSingle(),
+      db.from("programmes").select("id, entity_id, programme_code").eq("id", programmeId).maybeSingle(),
       db.from("branches").select("id, entity_id, branch_code").eq("id", branchId).maybeSingle(),
     ]);
-    if (programmeRes.error || !programmeRes.data) throw new ValidationError("Please select a valid programme.");
-    if (branchRes.error || !branchRes.data || branchRes.data.entity_id !== programmeRes.data.entity_id) {
-      throw new ValidationError("Please select a valid branch.");
+    const relationshipErrors: Record<string, string> = {};
+    if (programmeRes.error || !programmeRes.data) relationshipErrors.programme_id = "Please select a valid programme.";
+    if (
+      branchRes.error
+      || !branchRes.data
+      || (programmeRes.data && branchRes.data.entity_id !== programmeRes.data.entity_id)
+    ) {
+      relationshipErrors.branch_id = "Please select a valid branch.";
+    }
+    throwFieldErrors(relationshipErrors);
+    const programme = programmeRes.data!;
+    const branch = branchRes.data!;
+
+    const entityId = programme.entity_id;
+    const entityRes = await db.from("entities").select("short_code").eq("id", entityId).maybeSingle();
+    if (entityRes.error || !entityRes.data) fieldValidation("programme_id", "Please select a valid programme.");
+    if (entityRes.data.short_code === "IETA" && !["KL", "PG"].includes(branch.branch_code)) {
+      fieldValidation("branch_id", "Please select KL or Penang for an IETA intake.");
     }
 
-    const entityId = programmeRes.data.entity_id;
-    const entityRes = await db.from("entities").select("short_code").eq("id", entityId).maybeSingle();
-    if (entityRes.error || !entityRes.data) throw new ValidationError("Please select a valid programme.");
-    if (entityRes.data.short_code === "IETA" && !["KL", "PG"].includes(branchRes.data.branch_code)) {
-      throw new ValidationError("Please select KL or Penang for an IETA intake.");
-    }
+    const intakeName = textOrNull(body.intake_name)
+      || `${programme.programme_code} ${branch.branch_code} ${code}`;
 
     let originalExpectedDate = submittedOriginalExpectedDate || expectedDate;
     let revisedBy: string | null = null;
@@ -89,21 +126,26 @@ export async function POST(request: Request) {
         .select("expected_completion_date, original_expected_completion_date")
         .eq("id", existingId)
         .maybeSingle();
-      if (existingRes.error || !existingRes.data) throw new ValidationError("Please open a valid intake record.");
-      originalExpectedDate = existingRes.data.original_expected_completion_date || existingRes.data.expected_completion_date || expectedDate;
-      if (existingRes.data.expected_completion_date !== expectedDate) {
-        if (!completionReason) throw new ValidationError("Please enter a revision or completion reason.");
+      if (existingRes.error || !existingRes.data) fieldValidation("id", "Please open a valid intake record.");
+      originalExpectedDate = existingRes.data.original_expected_completion_date
+        || existingRes.data.expected_completion_date
+        || expectedDate;
+      if (existingRes.data.expected_completion_date && existingRes.data.expected_completion_date !== expectedDate) {
+        if (!completionReason) {
+          fieldValidation("completion_reason", "Please enter a reason for changing the expected completion date.");
+        }
         revisedBy = user.id;
         revisedAt = new Date().toISOString();
       }
     }
 
     const payload: Record<string, unknown> = {
+      id: existingId || crypto.randomUUID(),
       programme_id: programmeId,
       entity_id: entityId,
       branch_id: branchId,
       intake_code: code,
-      intake_name: textOrNull(body.intake_name),
+      intake_name: intakeName,
       start_date: startDate,
       original_expected_completion_date: originalExpectedDate,
       expected_completion_date: expectedDate,
@@ -127,12 +169,18 @@ export async function POST(request: Request) {
       : await db.from("programme_intakes").insert(payload);
 
     if (saveRes.error) {
-      return NextResponse.json({ error: friendlyDatabaseError("intake", saveRes.error) }, { status: 400 });
+      return NextResponse.json({
+        error: friendlyDatabaseError("intake", saveRes.error),
+        field_errors: databaseFieldErrors("intake", saveRes.error),
+      }, { status: 400 });
     }
-    return NextResponse.json({ id: existingId });
+    return NextResponse.json({ id: payload.id, intake_name: intakeName, status });
   } catch (error) {
-    if (error instanceof ValidationError) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof ValidationError) return NextResponse.json(validationResponse(error), { status: 400 });
     console.error("Unexpected intake save error", error);
-    return NextResponse.json({ error: friendlyDatabaseError("intake", null) }, { status: 500 });
+    return NextResponse.json({
+      error: friendlyDatabaseError("intake", null),
+      field_errors: {},
+    }, { status: 500 });
   }
 }
