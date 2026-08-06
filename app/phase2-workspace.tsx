@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ActionGroup, DetailDrawer, FieldValue, MoreActions, PageTabs, StatusBadge } from "@/app/ui-v2";
 
@@ -271,6 +271,7 @@ function BillsWorkspaceV21(props: Row) {
   const { billId, bills, bill, setBill, entities, suppliers, selectedSuppliers, categories, billFiles, setBillFiles, uploading, onSaveBill, voucher, setVoucher, voucherItems, setVoucherItems, recurring, banks, onSaveVoucher, onFromBill, payment, setPayment, onSavePayment, vouchers, docs, links } = props;
   const [tab, setTab] = useState<BillTab>("list");
   const [selected, setSelected] = useState<Row | null>(null);
+  const voucherDraftRef = useRef<HTMLDivElement>(null);
   const awaiting = bills.filter((row: Row) => !["paid", "cancelled"].includes(row.payment_status));
 
   useEffect(() => {
@@ -282,7 +283,7 @@ function BillsWorkspaceV21(props: Row) {
   function beginVoucher(row: Row) {
     onFromBill(row);
     setTab("voucher");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.setTimeout(() => voucherDraftRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   return <section>
@@ -298,11 +299,13 @@ function BillsWorkspaceV21(props: Row) {
       <Panel title="Bills Awaiting Payment">
         {!awaiting.length ? <div className="empty">No unpaid bills are awaiting payment.</div> : <BillListV21 rows={awaiting} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} />}
       </Panel>
+      <div ref={voucherDraftRef}>
       <Panel title="Payment Voucher Draft">
         <p className="form-note">Choose a bill above to prefill the draft, or enter a manual voucher. The voucher remains a draft until issued from Payment Vouchers.</p>
         <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSaveVoucher} entities={entities} suppliers={suppliers.filter((row: Row) => row.active_status)} categories={categories} bills={bills} recurring={recurring} bankAccounts={banks} onCancel={() => { setVoucher({ ...emptyVoucher, entity_id: voucher.entity_id }); setVoucherItems([{ ...emptyItem }]); setTab("list"); }} />
         <details className="advanced-section"><summary>Record an existing bill payment</summary><div className="advanced-section-body"><PaymentForm payment={payment} setPayment={setPayment} save={onSavePayment} bills={bills} vouchers={vouchers} /></div></details>
       </Panel>
+      </div>
     </>}
 
     <DetailDrawer open={Boolean(selected)} title={selected?.description || "Bill details"} subtitle={selected?.bill_number || "No bill number"} onClose={() => setSelected(null)} footer={selected && <ActionGroup><button type="button" className="primary" onClick={() => { beginVoucher(selected); setSelected(null); }}>Create PV Draft</button><button type="button" className="neutral" onClick={() => setSelected(null)}>Close</button></ActionGroup>}>
