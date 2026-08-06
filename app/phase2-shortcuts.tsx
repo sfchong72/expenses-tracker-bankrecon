@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 const navGroups = [
   {
     label: "Dashboard",
-    items: [{ label: "Hub", href: "/" }],
+    items: [{ label: "Dashboard", href: "/" }],
   },
   {
     label: "Finance Operations",
@@ -24,19 +24,20 @@ const navGroups = [
   {
     label: "Student Operations",
     items: [
-      { label: "Student Dashboard", href: "/student-operations" },
+      { label: "Dashboard", href: "/student-operations" },
       { label: "Students", href: "/students" },
+      { label: "Import Students", href: "/students/import" },
       { label: "Programmes", href: "/programmes" },
       { label: "Intakes", href: "/intakes" },
       { label: "Enrolments", href: "/enrolments" },
     ],
   },
   {
-    label: "Settings",
+    label: "Admin",
     items: [
       { label: "UAT Feedback", href: "/uat" },
-      { label: "Staff Access", href: "/settings/users" },
-      { label: "Foundation", href: "/settings/foundation" },
+      { label: "Users", href: "/settings/users" },
+      { label: "Settings", href: "/settings/foundation" },
     ],
   },
 ];
@@ -55,8 +56,8 @@ export function Phase2Shortcuts() {
   return (
     <div className="app-shell-nav">
       <div className="brand-lockup">
-        <strong>Finance Operations</strong>
-        <span>Audit-ready admin workspace</span>
+        <strong>Inter-Excel Operations Hub</strong>
+        <span>Finance and Student Operations</span>
       </div>
       <nav className="shortcutbar grouped" aria-label="Main navigation">
         {navGroups.map((group) => (
