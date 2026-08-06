@@ -5,10 +5,13 @@ const entityBranches = branchesForEntity(branches, entities, form.entity_id);
 const nationalityOption = form._nationality_other || (form.nationality && !NATIONALITIES.includes(form.nationality)) ? "Other" : (form.nationality || "Malaysian");
 return (<form onSubmit={onSubmit} noValidate>
 <p className="form-guidance wide">Only fields marked <span className="required-mark">*</span> are required for a Student Draft. Everything else can be completed later.</p>
+<fieldset className="form-section"><legend>Required / Basic</legend>
 <Field name="entity_id" label="Entity" required error={errors.entity_id}><select value={form.entity_id} onChange={(event) => { const entityId = event.target.value; const nextBranches = branchesForEntity(branches, entities, entityId); setForm({ ...form, entity_id: entityId, home_branch_id: nextBranches[0]?.id || "" }); }}><option value="">Choose entity</option>{entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.short_code}</option>)}</select></Field>
 <Field name="home_branch_id" label="Home branch" required error={errors.home_branch_id}><select value={form.home_branch_id || ""} onChange={(event) => setForm({ ...form, home_branch_id: event.target.value })}><option value="">Choose home branch</option>{entityBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} - {branch.branch_name}</option>)}</select></Field>
 <Field name="full_name" label="Full name" required error={errors.full_name}><input value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })}/></Field>
 <Field name="lifecycle_status" label="Record status" error={errors.lifecycle_status}><select value={form.lifecycle_status || "draft"} onChange={(event) => setForm({ ...form, lifecycle_status: event.target.value })}>{["draft", "active", "incomplete", "inactive", "archived"].map((status) => <option key={status} value={status}>{status}</option>)}</select></Field>
+</fieldset>
+<details className="advanced-section"><summary>Optional identity and contact details</summary><div className="advanced-section-body">
 <Field name="preferred_name" label="Preferred name" optional error={errors.preferred_name}><input value={form.preferred_name || ""} onChange={(event) => setForm({ ...form, preferred_name: event.target.value })}/></Field>
 <Field name="identity_document_type" label="IC/passport type" optional error={errors.identity_document_type}><select value={form.identity_document_type || ""} onChange={(event) => setForm({ ...form, identity_document_type: event.target.value })}><option value="">Not recorded</option><option value="ic">IC</option><option value="passport">Passport</option><option value="other">Other</option></select></Field>
 <Field name="identity_number_protected" label="IC/passport number" optional error={errors.identity_number_protected}><input value={form.identity_number_protected || ""} onChange={(event) => setForm({ ...form, identity_number_protected: event.target.value })} placeholder={form.id ? "Leave blank to keep unchanged" : ""}/></Field>
@@ -18,6 +21,8 @@ return (<form onSubmit={onSubmit} noValidate>
 <Field name="gender" label="Gender" optional error={errors.gender}><select value={form.gender || ""} onChange={(event) => setForm({ ...form, gender: event.target.value })}><option value="">Not recorded</option><option value="female">Female</option><option value="male">Male</option></select></Field>
 <Field name="phone" label="Phone" optional error={errors.phone}><input value={form.phone || ""} onChange={(event) => setForm({ ...form, phone: event.target.value })}/></Field>
 <Field name="email" label="Email" optional error={errors.email}><input type="email" value={form.email || ""} onChange={(event) => setForm({ ...form, email: event.target.value })}/></Field>
+</div></details>
+<details className="advanced-section"><summary>Optional education and emergency contact</summary><div className="advanced-section-body">
 <Field name="education_level" label="Education level" optional error={errors.education_level}><select value={form.education_level || ""} onChange={(event) => setForm({ ...form, education_level: event.target.value })}><option value="">Not recorded</option>{EDUCATION_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></Field>
 <Field name="qualification_details" label="Qualification details" optional error={errors.qualification_details}><input value={form.qualification_details || ""} onChange={(event) => setForm({ ...form, qualification_details: event.target.value })} placeholder="Diploma in Business"/></Field>
 <Field name="education_institution" label="Institution or school" optional error={errors.education_institution}><input value={form.education_institution || ""} onChange={(event) => setForm({ ...form, education_institution: event.target.value })}/></Field>
@@ -26,6 +31,8 @@ return (<form onSubmit={onSubmit} noValidate>
 <Field name="emergency_contact_name" label="Emergency contact name" optional error={errors.emergency_contact_name}><input value={form.emergency_contact_name || ""} onChange={(event) => setForm({ ...form, emergency_contact_name: event.target.value })}/></Field>
 <Field name="emergency_contact_phone" label="Emergency contact phone" optional error={errors.emergency_contact_phone}><input value={form.emergency_contact_phone || ""} onChange={(event) => setForm({ ...form, emergency_contact_phone: event.target.value })}/></Field>
 <Field name="emergency_contact_relationship" label="Relationship" optional error={errors.emergency_contact_relationship}><input value={form.emergency_contact_relationship || ""} onChange={(event) => setForm({ ...form, emergency_contact_relationship: event.target.value })}/></Field>
+</div></details>
+<details className="advanced-section"><summary>Optional address, measurements and notes</summary><div className="advanced-section-body">
 <Field name="address" label="Address" optional error={errors.address} wide><textarea value={form.address || ""} onChange={(event) => setForm({ ...form, address: event.target.value })}/></Field>
 <Field name="city" label="City" optional error={errors.city}><input value={form.city || ""} onChange={(event) => setForm({ ...form, city: event.target.value })}/></Field>
 <Field name="state" label="State" optional error={errors.state}>{form.country === "Malaysia" ? <select value={form.state || ""} onChange={(event) => setForm({ ...form, state: event.target.value })}><option value="">Not recorded</option>{MALAYSIAN_STATES.map((state) => <option key={state} value={state}>{state}</option>)}</select> : <input value={form.state || ""} onChange={(event) => setForm({ ...form, state: event.target.value })}/>}</Field>
@@ -37,6 +44,7 @@ return (<form onSubmit={onSubmit} noValidate>
 <Field name="measurement_date" label="Measurement date" optional error={errors.measurement_date}><input type="date" value={form.measurement_date || ""} onChange={(event) => setForm({ ...form, measurement_date: event.target.value })}/></Field>
 <Field name="measurement_remarks" label="Measurement remarks" optional error={errors.measurement_remarks} wide><textarea value={form.measurement_remarks || ""} onChange={(event) => setForm({ ...form, measurement_remarks: event.target.value })}/></Field>
 <Field name="remarks" label="Remarks" optional error={errors.remarks} wide><textarea value={form.remarks || ""} onChange={(event) => setForm({ ...form, remarks: event.target.value })}/></Field>
+</div></details>
 <FormActions busy={busy} onCancel={onCancel}/>
 </form>);
 }
