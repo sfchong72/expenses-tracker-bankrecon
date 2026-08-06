@@ -324,7 +324,7 @@ export default function StudentImportPage() {
               <td>{batch.successful_rows}</td>
               <td>{batch.skipped_rows}</td>
               <td>{batch.failed_rows}</td>
-              <td>{["completed", "completed_with_errors"].includes(batch.status) ? <button className="danger" disabled={busy} onClick={() => void revertBatch(batch.id)}>Revert</button> : "â€”"}</td>
+              <td>{["completed", "completed_with_errors"].includes(batch.status) ? <button className="danger" disabled={busy} onClick={() => void revertBatch(batch.id)}>Revert</button> : batch.status === "reverted" ? <span className="help">No action</span> : <span className="help">Revert unavailable</span>}</td>
             </tr>)}</tbody>
           </table>
         </div>

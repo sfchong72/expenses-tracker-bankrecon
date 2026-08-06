@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AuthBar } from "@/app/auth-bar";
+import { ActionGroup, PageTabs } from "@/app/ui-v2";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, any>;
@@ -33,6 +34,7 @@ export default function UserSettingsPage() {
   const [message, setMessage] = useState("Loading staff access...");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState("users");
   const [createForm, setCreateForm] = useState({
     email: "",
     displayName: "",
@@ -123,13 +125,23 @@ export default function UserSettingsPage() {
     setMessage(`Staff login created for ${body.email}. Share the temporary password securely and ask them to change it later.`);
     setCreateForm({ email: "", displayName: "", password: "", role: "finance_staff", entityIds: [], permissions: defaultPermissions });
     await load();
+    setActiveTab("users");
   }
 
   async function saveStaff(event: FormEvent) {
     event.preventDefault();
-    if (!editForm || editForm.role === "owner") return;
+    if (!editForm) return;
     setBusy(true);
     setError("");
+    if (editForm.role === "owner") {
+      const ownerUpdate = await db.from("app_profiles").update({ display_name: editForm.display_name || null }).eq("id", editForm.id);
+      if (ownerUpdate.error) return finishError(friendlyProfileUpdateError(ownerUpdate.error.message));
+      await db.from("audit_logs").insert({ action: "owner_profile_updated", entity_type: "app_profile", entity_id: editForm.id, payload: { display_name: editForm.display_name || null } });
+      setBusy(false);
+      setMessage("Owner display name updated. Printed documents will use the display name where available.");
+      await load();
+      return;
+    }
     const profileUpdate = await db.from("app_profiles").update({
       display_name: editForm.display_name || null,
       role: editForm.role,
@@ -193,7 +205,7 @@ export default function UserSettingsPage() {
           <h1>Staff Access</h1>
           <p className="subtitle">Invite one or two testers safely. Your owner login remains unchanged.</p>
         </div>
-        <AuthBar />
+        <ActionGroup><button type="button" className="primary primary-action" onClick={() => setActiveTab("create")}>+ Create Staff Login</button><AuthBar /></ActionGroup>
       </header>
 
       <section className={error ? "notice error" : "notice"}>
@@ -201,14 +213,15 @@ export default function UserSettingsPage() {
         <button onClick={() => void load()}>Refresh</button>
       </section>
 
-      <section className="grid">
-        <section className="panel">
-          <h2>Create Staff Tester Login</h2>
+      <PageTabs tabs={[{ id: "users", label: "Existing Users", count: profiles.length }, { id: "create", label: "Create Staff Login" }]} active={activeTab} onChange={setActiveTab} label="User settings views" />
+
+      {activeTab === "create" && <section className="panel">
+          <div className="section-heading"><div><h2>Create Staff Tester Login</h2><p className="help">Required fields are marked with an asterisk.</p></div><button type="button" className="neutral" onClick={() => setActiveTab("users")}>Cancel</button></div>
           <form onSubmit={createStaff}>
-            <label>Email<input type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} required /></label>
+            <label>Email <span className="required-mark">*</span><input type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} required /></label>
             <label>Display name<input value={createForm.displayName} onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })} /></label>
-            <label>Temporary password<input type="password" minLength={8} value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} required /></label>
-            <label>Role<select value={createForm.role} onChange={(e) => setCreateRole(e.target.value)}>{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{roleHelp[createForm.role]}</span></label>
+            <label>Temporary password <span className="required-mark">*</span><input type="password" minLength={8} value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} required /></label>
+            <label>Role <span className="required-mark">*</span><select value={createForm.role} required onChange={(e) => setCreateRole(e.target.value)}>{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{roleHelp[createForm.role]}</span></label>
             <fieldset className="wide">
               <legend>Entities for testing</legend>
               <div className="checkgrid">{entities.map((entity) => <label key={entity.id} className="inline"><input type="checkbox" checked={createForm.entityIds.includes(entity.id)} onChange={() => toggleCreateEntity(entity.id)} /> {entity.short_code}</label>)}</div>
@@ -217,18 +230,17 @@ export default function UserSettingsPage() {
             <button disabled={busy}>{busy ? "Creating..." : "Create Staff Login"}</button>
           </form>
           <p className="help">If this button says the service key is missing, add server-only `SUPABASE_SERVICE_ROLE_KEY` in Vercel or create the Auth user manually in Supabase first.</p>
-          <p className="help">Temporary passwords are shown only while you type them here and are never displayed again. For a reset, use Supabase Auth password recovery or set a new temporary password in Supabase.</p>
-        </section>
+          <p className="help">Temporary passwords are shown only while you type them here and are never displayed again. For a reset, use Supabase Auth password recovery or set a new temporary password in Supabase.</p></section>}
 
+      {activeTab === "users" && <>
         <section className="panel">
           <h2>Existing Users</h2>
           <UserTable rows={profiles} access={access} entities={entities} onEdit={openEdit} />
         </section>
-      </section>
 
       <section className="panel">
         <h2>Edit Staff Access</h2>
-        {!editForm ? <div className="empty">Select a staff user to edit.</div> : editForm.role === "owner" ? <div className="notice error"><p>Owner accounts are shown for reference only. Keep your owner Gmail active while staff testing.</p></div> : (
+        {!editForm ? <div className="empty">Select a staff user to edit.</div> : editForm.role === "owner" ? <form onSubmit={saveStaff}><p className="form-note">Owner login, role and entity access remain unchanged. Only the display name will be updated.</p><label>Email<input value={editForm.email || ""} readOnly /></label><label>Display name<input value={editForm.display_name || ""} onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })} /></label><button disabled={busy}>{busy ? "Saving..." : "Save Owner Display Name"}</button></form> : (
           <form onSubmit={saveStaff}>
             <label>Email<input value={editForm.email || ""} readOnly /></label>
             <label>Display name<input value={editForm.display_name || ""} onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })} /></label>
@@ -242,7 +254,7 @@ export default function UserSettingsPage() {
             <button disabled={busy}>{busy ? "Saving..." : "Save Staff Access"}</button>
           </form>
         )}
-      </section>
+      </section></>}
     </main>
   );
 }
@@ -273,4 +285,10 @@ function toggleId(ids: string[], id: string) {
 
 function label(value: unknown) {
   return String(value ?? "").replaceAll("_", " ");
+}
+
+function friendlyProfileUpdateError(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("row-level security") || lower.includes("policy") || lower.includes("permission")) return "Display name update requires RLS or database policy change.";
+  return message || "Display name could not be updated.";
 }
