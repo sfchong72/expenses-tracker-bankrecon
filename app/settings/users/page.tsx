@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AuthBar } from "@/app/auth-bar";
-import { ActionGroup, PageTabs } from "@/app/ui-v2";
+import { ActionGroup, PageTabs, StatusBadge } from "@/app/ui-v2";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, any>;
@@ -276,7 +276,7 @@ function PermissionEditor({ permissions, setPermissions }: { permissions: Row; s
 
 function UserTable({ rows, access, entities, onEdit }: { rows: Row[]; access: Row[]; entities: Row[]; onEdit: (row: Row) => void }) {
   if (!rows.length) return <div className="empty">No users yet.</div>;
-  return <div className="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Entities</th><th>Status</th><th /></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.display_name || "-"}<br />{row.email}{row.role !== "owner" ? <><br /><span className="tag">TRIAL ACCESS</span></> : null}</td><td>{label(row.role)}</td><td>{access.filter((item) => item.user_id === row.id && item.active_status).map((item) => entities.find((entity) => entity.id === item.entity_id)?.short_code).filter(Boolean).join(", ") || (row.role === "owner" ? "All" : "-")}</td><td>{row.active_status ? "Active" : "Inactive"}</td><td><button onClick={() => onEdit(row)}>Edit</button></td></tr>)}</tbody></table></div>;
+  return <div className="record-list user-record-list"><div className="record-list-head"><span>User</span><span>Role</span><span>Entities</span><span>Status</span><span>Actions</span></div>{rows.map((row) => { const entityCodes = access.filter((item) => item.user_id === row.id && item.active_status).map((item) => entities.find((entity) => entity.id === item.entity_id)?.short_code).filter(Boolean); return <div className="record-row" key={row.id}><div className="record-row-main"><div className="record-primary"><strong>{row.display_name || "Display name not set"}</strong><span>{row.email}</span></div><div className="record-secondary">{label(row.role)}{row.role !== "owner" ? " · Trial access" : ""}</div><div className="entity-chips">{row.role === "owner" ? <span className="entity-chip">All</span> : entityCodes.length ? entityCodes.map((code) => <span className="entity-chip" key={code}>{code}</span>) : <span className="record-secondary">None</span>}</div><StatusBadge status={row.active_status ? "active" : "inactive"} /><ActionGroup><button className="primary" onClick={() => onEdit(row)}>Edit User</button></ActionGroup></div></div>; })}</div>;
 }
 
 function toggleId(ids: string[], id: string) {

@@ -37,6 +37,15 @@ export function ActionGroup({ children, label = "Record actions" }: { children: 
   return <div className="record-actions" aria-label={label}>{children}</div>;
 }
 
+export function MoreActions({ children, label = "More" }: { children: ReactNode; label?: string }) {
+  return (
+    <details className="more-actions">
+      <summary>{label}</summary>
+      <div className="more-actions-menu" role="group" aria-label={`${label} actions`}>{children}</div>
+    </details>
+  );
+}
+
 export function DetailDrawer({ open, title, subtitle, onClose, children, footer }: { open: boolean; title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   if (!open) return null;
   return (

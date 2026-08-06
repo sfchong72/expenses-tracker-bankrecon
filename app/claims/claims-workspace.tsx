@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthBar } from "@/app/auth-bar";
+import { ActionGroup, DetailDrawer, FieldValue, MoreActions, StatusBadge } from "@/app/ui-v2";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, any>;
@@ -94,6 +95,7 @@ export function ClaimsWorkspace({ mode = "all", claimId }: { mode?: ViewMode; cl
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState(claimId || "");
+  const [detailId, setDetailId] = useState("");
 
   useEffect(() => { void load(); }, []);
   useEffect(() => {
@@ -312,7 +314,7 @@ export function ClaimsWorkspace({ mode = "all", claimId }: { mode?: ViewMode; cl
     if (mode === "reimbursements") return ["approved", "payment_prepared", "reimbursed"].includes(row.status);
     return true;
   });
-  const selected = claims.find((row) => row.id === selectedId) || filteredClaims[0];
+  const selected = claims.find((row) => row.id === detailId);
   const selectedLines = selected ? lines.filter((line) => line.claim_id === selected.id) : [];
   const selectedAdvances = selected ? advances.filter((advance) => advance.claim_id === selected.id) : [];
   const missingEvidence = lines.filter((line) => line.requires_receipt && line.document_status === "missing");
@@ -378,16 +380,14 @@ export function ClaimsWorkspace({ mode = "all", claimId }: { mode?: ViewMode; cl
         </div>
       </section>}
 
-      <section className="grid">
-        <section className="panel">
-          <h2>Claim List</h2>
-          <ClaimTable rows={filteredClaims} entities={entities} vouchers={vouchers} onOpen={loadIntoForm} onSelect={setSelectedId} onStatus={moveStatus} onVoucher={prepareVoucher} onPrint={(row: Row) => printClaim(row, lines.filter((line) => line.claim_id === row.id), advances.filter((advance) => advance.claim_id === row.id), categories, links, documents)} />
-        </section>
-        <section className="panel">
-          <h2>Claim Detail</h2>
-          {selected ? <ClaimDetail claim={selected} lines={selectedLines} advances={selectedAdvances} entities={entities} categories={categories} docs={documents} links={links} onPrint={() => printClaim(selected, selectedLines, selectedAdvances, categories, links, documents)} /> : <div className="empty">Select a claim to view details.</div>}
-        </section>
+      <section className="panel">
+        <div className="section-heading"><div><h2>Claim List</h2><p className="help">Open details without squeezing the list. Workflow actions are grouped under More.</p></div><Link className="button-link primary" href="/claims/new">+ New Claim</Link></div>
+        <ClaimTable rows={filteredClaims} entities={entities} vouchers={vouchers} onOpen={loadIntoForm} onSelect={setDetailId} onStatus={moveStatus} onVoucher={prepareVoucher} onPrint={(row: Row) => printClaim(row, lines.filter((line) => line.claim_id === row.id), advances.filter((advance) => advance.claim_id === row.id), categories, links, documents)} />
       </section>
+
+      <DetailDrawer open={Boolean(selected)} title={selected?.claim_number || "Draft Claim"} subtitle={selected?.claimant_name} onClose={() => setDetailId("")} footer={selected && <ActionGroup><button className="neutral" onClick={() => printClaim(selected, selectedLines, selectedAdvances, categories, links, documents)}>Print</button>{selected.status === "draft" && <button className="primary" onClick={() => { loadIntoForm(selected); setDetailId(""); }}>Edit Claim</button>}</ActionGroup>}>
+        {selected && <ClaimDetail claim={selected} lines={selectedLines} advances={selectedAdvances} entities={entities} categories={categories} docs={documents} links={links} />}
+      </DetailDrawer>
 
       <section className="panel">
         <h2>Missing Claim Evidence</h2>
@@ -399,6 +399,7 @@ export function ClaimsWorkspace({ mode = "all", claimId }: { mode?: ViewMode; cl
 
 function ClaimForm({ claim, setClaim, entities, profiles, save, resetForm, busy, fieldErrors }: Row) {
   return <form onSubmit={save}>
+    <fieldset className="form-section"><legend>Required / Basic</legend>
     <label>Claim mode<select value={claim.claim_mode} onChange={(event) => resetForm(event.target.value)}><option value="staff_cash_travel">Staff Cash / Travel</option><option value="credit_card">Credit Card</option></select></label>
     <label>Claim type<select value={claim.claim_type} onChange={(event) => setClaim({ ...claim, claim_type: event.target.value })}>{claim.claim_mode === "credit_card" ? <><option value="personal_credit_card_claim">Personal credit card claim</option><option value="company_credit_card_claim">Company credit card claim</option><option value="director_claim">Director claim</option></> : <><option value="travel_claim">Travel claim</option><option value="staff_cash_claim">Staff cash claim</option><option value="director_claim">Director claim</option><option value="staff_advance">Staff advance</option><option value="director_advance">Director advance</option><option value="petty_cash">Petty cash</option><option value="mileage_claim">Mileage claim</option></>}</select></label>
     <Select label="Entity" value={claim.entity_id} onChange={(v) => setClaim({ ...claim, entity_id: v })} rows={entities} error={errorFor(fieldErrors, "claim", "entity_id")} />
@@ -413,8 +414,11 @@ function ClaimForm({ claim, setClaim, entities, profiles, save, resetForm, busy,
       <label>Claim period start<input type="date" value={claim.claim_period_start || today} onChange={(event) => setClaim({ ...claim, claim_period_start: event.target.value })} /></label>
       <label>Claim period end<input type="date" value={claim.claim_period_end || today} onChange={(event) => setClaim({ ...claim, claim_period_end: event.target.value })} /></label>
     </>}
+    </fieldset>
+    <details className="advanced-section"><summary>Optional claim details</summary><div className="advanced-section-body">
     <label className="wide">Trip / business purpose<input value={claim.trip_or_business_purpose || ""} onChange={(event) => setClaim({ ...claim, trip_or_business_purpose: event.target.value })} /></label>
     <label className="wide">Remarks<textarea value={claim.remarks || ""} onChange={(event) => setClaim({ ...claim, remarks: event.target.value })} /></label>
+    </div></details>
     <button disabled={busy}>{busy ? "Saving..." : "Save Draft"}</button>
   </form>;
 }
@@ -495,24 +499,23 @@ function DerivedTotals({ lines, advances }: Row) {
 
 function ClaimTable({ rows, entities, vouchers, onOpen, onSelect, onStatus, onVoucher, onPrint }: Row) {
   if (!rows.length) return <div className="empty">No claims in this view.</div>;
-  return <div className="table-wrap"><table><thead><tr><th>No</th><th>Entity</th><th>Claimant</th><th>Type</th><th>Total</th><th>Evidence</th><th>Status</th><th /></tr></thead><tbody>{rows.map((row: Row) => <tr key={row.id}><td>{row.claim_number || "Draft"}</td><td>{entityName(entities, row.entity_id)}</td><td>{row.claimant_name}</td><td>{label(row.claim_type)}</td><td>{money(row.gross_claim_total)}<br />Net: {money(row.net_payable_amount)}</td><td>{label(row.evidence_status)}</td><td><span className={`status-pill status-${row.status}`}>{label(row.status)}</span><br />{vouchers.find((v: Row) => v.id === row.payment_voucher_id)?.voucher_number}</td><td className="actions"><button className="secondary" onClick={() => onSelect(row.id)}>Detail</button>{row.status === "draft" && <button onClick={() => onOpen(row)}>Edit</button>}{row.status === "draft" && <button onClick={() => onStatus(row, "submitted")}>Submit</button>}{row.status === "submitted" && <button onClick={() => onStatus(row, "under_review")}>Start Review</button>}{row.status === "under_review" && <button onClick={() => onStatus(row, "checked")}>Check</button>}{row.status === "checked" && <button onClick={() => onStatus(row, "approved")}>Approve</button>}{row.status === "approved" && <button onClick={() => onVoucher(row)}>Prepare Voucher</button>}{row.status === "payment_prepared" && <button onClick={() => onStatus(row, "reimbursed")}>Mark Reimbursed</button>}{row.status === "reimbursed" && <button onClick={() => onStatus(row, "entered_in_sql_accounting")}>Mark SQL Entered</button>}<button className="neutral" onClick={() => onPrint(row)}>Print</button><a className="button neutral" href={`/api/claims/export?claimId=${row.id}`}>Export</a></td></tr>)}</tbody></table></div>;
+  return <div className="record-list claim-record-list"><div className="record-list-head"><span>Claim / Claimant</span><span>Type / Entity</span><span>Amount</span><span>Status / Evidence</span><span>Actions</span></div>{rows.map((row: Row) => <div className="record-row" key={row.id}><div className="record-row-main"><div className="record-primary"><strong>{row.claim_number || "Draft"}</strong><span>{row.claimant_name}</span></div><div className="record-primary"><strong>{label(row.claim_type)}</strong><span>{entityName(entities, row.entity_id)}</span></div><div className="record-primary"><strong>{money(row.gross_claim_total)}</strong><span>Net {money(row.net_payable_amount)}</span></div><div className="record-primary"><StatusBadge status={row.status} /><span>{label(row.evidence_status)}{vouchers.find((v: Row) => v.id === row.payment_voucher_id)?.voucher_number ? ` · ${vouchers.find((v: Row) => v.id === row.payment_voucher_id)?.voucher_number}` : ""}</span></div><ActionGroup><button className="neutral" onClick={() => onSelect(row.id)}>View</button>{row.status === "draft" && <button className="primary" onClick={() => onOpen(row)}>Edit</button>}<button className="neutral" onClick={() => onPrint(row)}>Print</button><MoreActions>{row.status === "draft" && <button onClick={() => onStatus(row, "submitted")}>Submit</button>}{row.status === "submitted" && <button onClick={() => onStatus(row, "under_review")}>Start Review</button>}{row.status === "under_review" && <button onClick={() => onStatus(row, "checked")}>Check</button>}{row.status === "checked" && <button onClick={() => onStatus(row, "approved")}>Approve</button>}{row.status === "approved" && <button onClick={() => onVoucher(row)}>Prepare Voucher</button>}{row.status === "payment_prepared" && <button onClick={() => onStatus(row, "reimbursed")}>Mark Reimbursed</button>}{row.status === "reimbursed" && <button onClick={() => onStatus(row, "entered_in_sql_accounting")}>Mark SQL Entered</button>}<a className="action-button neutral" href={`/api/claims/export?claimId=${row.id}`}>Export</a></MoreActions></ActionGroup></div></div>)}</div>;
 }
 
-function ClaimDetail({ claim, lines, advances, entities, categories, docs, links, onPrint }: Row) {
+function ClaimDetail({ claim, lines, advances, entities, categories, docs, links }: Row) {
   const docList = links.filter((link: Row) => ["claim", "claim_line"].includes(link.linked_record_type) && (link.linked_record_id === claim.id || lines.some((line: Row) => line.id === link.linked_record_id))).map((link: Row) => docs.find((doc: Row) => doc.id === link.document_id)?.original_filename).filter(Boolean);
   return <div>
-    <div className="preview-grid"><p><b>Claim</b>{claim.claim_number || "Draft"}</p><p><b>Entity</b>{entityName(entities, claim.entity_id)}</p><p><b>Status</b>{label(claim.status)}</p><p><b>Claimant</b>{claim.claimant_name}</p><p><b>Gross</b>{money(claim.gross_claim_total)}</p><p><b>Net payable</b>{money(claim.net_payable_amount)}</p></div>
+    <div className="detail-grid"><FieldValue label="Entity">{entityName(entities, claim.entity_id)}</FieldValue><FieldValue label="Status"><StatusBadge status={claim.status} /></FieldValue><FieldValue label="Gross">{money(claim.gross_claim_total)}</FieldValue><FieldValue label="Net payable">{money(claim.net_payable_amount)}</FieldValue></div>
     <h3>Lines</h3>
-    <table><thead><tr><th>Type</th><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th>Evidence</th></tr></thead><tbody>{lines.map((line: Row) => <tr key={line.id}><td>{label(line.line_type)}</td><td>{line.expense_date || line.transaction_date}</td><td>{line.description}<br />{line.merchant_or_supplier}</td><td>{categoryName(categories, line.expense_category_id)}</td><td>{money(line.myr_converted_amount || line.amount)}</td><td>{label(line.document_status)}</td></tr>)}</tbody></table>
+    <div className="compact-detail-list">{lines.length ? lines.map((line: Row) => <div className="list-row" key={line.id}><span><b>{line.description}</b><small>{label(line.line_type)} · {line.expense_date || line.transaction_date} · {categoryName(categories, line.expense_category_id)}</small></span><span><b>{money(line.myr_converted_amount || line.amount)}</b><small>{label(line.document_status)}</small></span></div>) : <p className="empty">No claim lines.</p>}</div>
     <p><b>Advances:</b> {advances.length ? advances.map((a: Row) => `${money(a.advance_amount)} ${a.advance_reference || ""}`).join(", ") : "None"}</p>
     <p><b>Documents:</b> {docList.length ? docList.join(", ") : "No documents linked yet"}</p>
-    <button onClick={onPrint}>Print / Save PDF</button>
   </div>;
 }
 
 function MissingEvidence({ rows, claims, categories }: Row) {
   if (!rows.length) return <div className="empty">No missing claim evidence.</div>;
-  return <table><thead><tr><th>Claim</th><th>Line</th><th>Category</th><th>Expected evidence</th></tr></thead><tbody>{rows.map((line: Row) => <tr key={line.id}><td>{claims.find((claim: Row) => claim.id === line.claim_id)?.claim_number || "Draft"}</td><td>{line.description}</td><td>{categoryName(categories, line.expense_category_id)}</td><td>{line.line_type === "mileage" ? "Route screenshot" : line.line_type === "accommodation" ? "Hotel invoice / receipt" : line.line_type === "credit_card_transaction" ? "Receipt or redacted card statement" : "Receipt or supporting document"}</td></tr>)}</tbody></table>;
+  return <div className="record-list evidence-record-list"><div className="record-list-head"><span>Claim</span><span>Line</span><span>Category</span><span>Expected evidence</span></div>{rows.map((line: Row) => <div className="record-row" key={line.id}><div className="record-row-main"><strong>{claims.find((claim: Row) => claim.id === line.claim_id)?.claim_number || "Draft"}</strong><div className="record-primary"><strong>{line.description}</strong><span>{label(line.line_type)}</span></div><span className="record-secondary">{categoryName(categories, line.expense_category_id)}</span><span className="record-secondary">{line.line_type === "mileage" ? "Route screenshot" : line.line_type === "accommodation" ? "Hotel invoice / receipt" : line.line_type === "credit_card_transaction" ? "Receipt or redacted card statement" : "Receipt or supporting document"}</span></div></div>)}</div>;
 }
 
 function calculateTotals(lines: Row[], advances: Row[]) {

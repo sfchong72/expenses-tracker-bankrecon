@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { ActionGroup, DetailDrawer, FieldValue, PageTabs, StatusBadge } from "@/app/ui-v2";
+import { ActionGroup, DetailDrawer, FieldValue, MoreActions, PageTabs, StatusBadge } from "@/app/ui-v2";
 
 type Row = Record<string, any>;
 type Mode = "suppliers" | "bills" | "recurring" | "vouchers" | "documents" | "missing";
@@ -242,7 +242,7 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
 
   return <main className="page-shell"><div className="shortcut-bar"><Link href="/suppliers">Suppliers</Link><Link href="/bills">Bills</Link><Link href="/recurring">Recurring</Link><Link href="/payment-vouchers">Payment Vouchers</Link><Link href="/documents">Documents</Link><Link href="/missing-documents">Missing Documents</Link></div><section className="page-hero"><div><span className="eyebrow">Finance Operations</span><h1>{title}</h1><p className="subtitle">{description}</p></div><div className="hero-stats"><strong>{bills.length} bills</strong><strong>{bills.filter((b) => b.due_date <= today && b.payment_status !== "paid").length} due soon</strong><strong>{docs.length} docs</strong></div></section><div className="status-bar"><span>{error || message}</span><span className="actions"><label className="inline"><input type="checkbox" checked={showDemo} onChange={(e) => setShowDemo(e.target.checked)} /> DEMO view</label><button className="neutral" onClick={() => void load()}>Refresh</button></span></div>
     {mode === "suppliers" && <section className="grid"><Panel title="Supplier / Payee"><SupplierForm supplier={supplier} setSupplier={setSupplier} save={saveSupplier} entities={entities} categories={categories} /></Panel><Panel title="Supplier List" action={<span className="actions"><button onClick={() => void demoAction("load")}>Load Phase 2 Demo Data</button><button onClick={() => void demoAction("remove")}>Remove Phase 2 Demo Data</button></span>}><SupplierTable rows={suppliers} entities={entities} supplierEntities={supplierEntities} setSupplier={setSupplier} toggleSupplier={toggleSupplier} /></Panel></section>}
-    {mode === "bills" && <section className="grid"><Panel title="Create Supplier Bill"><BillForm bill={bill} setBill={setBill} save={saveBill} entities={entities} suppliers={selectedSuppliers} categories={categories} files={billFiles} setFiles={setBillFiles} uploading={uploading} /></Panel><Panel title={billId ? "Bill Detail" : "Supplier Bills"}><BillTable rows={bills} entities={entities} suppliers={suppliers} onVoucher={createFromBill} docs={docs} links={links} /></Panel><Panel title="Record Payment"><PaymentForm payment={payment} setPayment={setPayment} save={savePayment} bills={bills} vouchers={vouchers} /></Panel></section>}
+    {mode === "bills" && <BillsWorkspaceV21 billId={billId} bills={bills} bill={bill} setBill={setBill} entities={entities} suppliers={suppliers} selectedSuppliers={selectedSuppliers} categories={categories} billFiles={billFiles} setBillFiles={setBillFiles} uploading={uploading} onSaveBill={saveBill} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} recurring={recurring} banks={banks} onSaveVoucher={saveVoucherDraft} onFromBill={createFromBill} payment={payment} setPayment={setPayment} onSavePayment={savePayment} vouchers={vouchers} docs={docs} links={links} />}
     {mode === "recurring" && <section className="grid"><Panel title="Recurring Obligation"><RecurringForm obligation={obligation} setObligation={setObligation} save={saveRecurring} entities={entities} suppliers={activeSuppliers(obligation.entity_id)} /></Panel><Panel title="Monthly Drafts" action={<button onClick={generateDrafts}>Generate Monthly Drafts</button>}>{!recurring.length ? <div className="empty">Nothing to show.</div> : recurring.map((r) => <div key={r.id} className="list-row"><b>{r.description}</b><span>{supplierName(r.supplier_id)} - day {r.due_day} - {money(r.expected_amount)}</span></div>)}</Panel></section>}
     {mode === "vouchers" && <VoucherWorkspaceV2 vouchers={vouchers} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} items={items} entities={entities} suppliers={suppliers} activeSuppliers={activeSuppliers} categories={categories} bills={bills} recurring={recurring} banks={banks} docs={docs} links={links} profiles={profiles} onSave={saveVoucherDraft} onIssue={issueVoucher} onEdit={editVoucher} onDelete={deleteVoucher} onVoid={voidVoucher} onFromBill={createFromBill} />}
     {mode === "documents" && <section className="grid"><Panel title="Upload Documents"><form onSubmit={uploadLibrary}><p className="wide help">The normal invoice workflow starts from Supplier Bills. This library is for secondary uploads and document review.</p><Select label="Entity" value={upload.entity_id} onChange={(v: string) => setUpload({ ...upload, entity_id: v, linked_record_id: "" })} rows={entities} /><label>Document type<select value={upload.document_type} onChange={(e) => setUpload({ ...upload, document_type: e.target.value })}>{docTypes.map((x) => <option key={x}>{x}</option>)}</select></label><label>Linked type<select value={upload.linked_record_type} onChange={(e) => setUpload({ ...upload, linked_record_type: e.target.value, linked_record_id: "" })}>{linkTypes.map((x) => <option key={x}>{x}</option>)}</select></label><Select label="Record" value={upload.linked_record_id} onChange={(v: string) => setUpload({ ...upload, linked_record_id: v })} rows={recordRows} required={false} empty="Choose" />{!recordRows.length && <p className="wide help">No {upload.linked_record_type.replaceAll("_", " ")} records available. Create the required record first.</p>}<Link href={upload.linked_record_type === "payment_voucher" ? "/payment-vouchers" : upload.linked_record_type === "recurring_obligation" ? "/recurring" : "/bills"}>Create required record</Link><label className="wide">Desktop files<input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/*" onChange={(e) => setLibraryFiles(Array.from(e.target.files ?? []))} /></label><label className="wide">Phone camera - supported mobile devices only<input type="file" accept="image/*" capture="environment" onChange={(e) => setLibraryFiles([...(libraryFiles ?? []), ...Array.from(e.target.files ?? [])])} /></label><FilePreview files={libraryFiles} /><button disabled={uploading || !libraryFiles.length || !upload.linked_record_id}>{uploading ? "Uploading..." : "Upload Documents"}</button></form></Panel><Panel title="Documents">{docs.map((d) => <div key={d.id} className="list-row"><b><Demo row={d} />{d.original_filename}</b><span>{d.document_type} - {Math.round(Number(d.file_size || 0) / 1024)} KB</span><button onClick={() => void downloadDoc(d.id)}>Preview / Download</button></div>)}</Panel></section>}
@@ -264,6 +264,66 @@ function SupplierTable({ rows, entities, supplierEntities, setSupplier, toggleSu
 function BillForm({ bill, setBill, save, entities, suppliers, categories, files, setFiles, uploading }: Row) { return <form onSubmit={save}><Select label="Entity" value={bill.entity_id} onChange={(v: string) => setBill({ ...bill, entity_id: v, supplier_id: "" })} rows={entities} /><Select label="Supplier" value={bill.supplier_id} onChange={(v: string) => setBill({ ...bill, supplier_id: v })} rows={suppliers} required={false} empty={bill.entity_id ? "Choose supplier" : "Choose entity first"} />{bill.entity_id && !suppliers.length && <p className="wide help">No active suppliers for this entity. Create one on the Suppliers page first.</p>}<label>Description<input value={bill.description} onChange={(e) => setBill({ ...bill, description: e.target.value })} required /></label><label>Bill no<input value={bill.bill_number} onChange={(e) => setBill({ ...bill, bill_number: e.target.value })} /></label><label>Bill type<select value={bill.bill_type} onChange={(e) => setBill({ ...bill, bill_type: e.target.value })}>{["supplier_invoice","recurring_obligation","statutory_payment","payroll_support","other"].map((x) => <option key={x}>{x}</option>)}</select></label><Select label="Expense category" value={bill.expense_category_id} onChange={(v: string) => setBill({ ...bill, expense_category_id: v })} rows={categories} required={false} /><label>Bill date<input type="date" value={bill.bill_date} onChange={(e) => setBill({ ...bill, bill_date: e.target.value })} /></label><label>Due date<input type="date" value={bill.due_date} onChange={(e) => setBill({ ...bill, due_date: e.target.value })} /></label><label>Subtotal<input type="number" step="0.01" value={bill.subtotal} onChange={(e) => setBill({ ...bill, subtotal: e.target.value })} /></label><label>Tax<input type="number" step="0.01" value={bill.tax_amount} onChange={(e) => setBill({ ...bill, tax_amount: e.target.value })} /></label><label>Total<input type="number" step="0.01" value={bill.total_amount} onChange={(e) => setBill({ ...bill, total_amount: e.target.value })} required /></label><label>Status<select value={bill.payment_status} onChange={(e) => setBill({ ...bill, payment_status: e.target.value })}>{["draft","unpaid","scheduled","partially_paid","paid","overdue","cancelled"].map((x) => <option key={x}>{x}</option>)}</select></label><label className="wide">Invoice documents - desktop file picker<input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/*" disabled={uploading} onChange={(e) => setFiles(Array.from(e.target.files ?? []))} /></label><label className="wide">Phone camera - supported mobile devices only<input type="file" accept="image/*" capture="environment" disabled={uploading} onChange={(e) => setFiles([...(files ?? []), ...Array.from(e.target.files ?? [])])} /></label><FilePreview files={files ?? []} /><textarea placeholder="remarks" value={bill.remarks} onChange={(e) => setBill({ ...bill, remarks: e.target.value })} /><button disabled={uploading}>{uploading ? "Saving and uploading..." : "Save bill and documents"}</button></form>; }
 function PaymentForm({ payment, setPayment, save, bills, vouchers }: Row) { return <form onSubmit={save}><Select label="Bill" value={payment.supplier_bill_id} onChange={(v: string) => setPayment({ ...payment, supplier_bill_id: v })} rows={bills} /><Select label="Voucher" value={payment.payment_voucher_id} onChange={(v: string) => setPayment({ ...payment, payment_voucher_id: v })} rows={vouchers} required={false} /><label>Amount<input type="number" step="0.01" value={payment.amount} onChange={(e) => setPayment({ ...payment, amount: e.target.value })} required /></label><label>Date<input type="date" value={payment.payment_date} onChange={(e) => setPayment({ ...payment, payment_date: e.target.value })} /></label><label>Method<input value={payment.method} onChange={(e) => setPayment({ ...payment, method: e.target.value })} /></label><label>Reference<input value={payment.payment_reference} onChange={(e) => setPayment({ ...payment, payment_reference: e.target.value })} /></label><textarea placeholder="remarks" value={payment.remarks} onChange={(e) => setPayment({ ...payment, remarks: e.target.value })} /><button>Record payment</button></form>; }
 function RecurringForm({ obligation, setObligation, save, entities, suppliers }: Row) { return <form onSubmit={save}><Select label="Entity" value={obligation.entity_id} onChange={(v: string) => setObligation({ ...obligation, entity_id: v, supplier_id: "" })} rows={entities} /><Select label="Supplier" value={obligation.supplier_id} onChange={(v: string) => setObligation({ ...obligation, supplier_id: v })} rows={suppliers} required={false} />{obligation.entity_id && !suppliers.length && <p className="wide help">No active suppliers for this entity. Create one first.</p>}<label>Description<input value={obligation.description} onChange={(e) => setObligation({ ...obligation, description: e.target.value })} required /></label><label>Expected amount<input type="number" step="0.01" value={obligation.expected_amount} onChange={(e) => setObligation({ ...obligation, expected_amount: e.target.value })} /></label><label>Due day<input type="number" value={obligation.due_day} onChange={(e) => setObligation({ ...obligation, due_day: e.target.value })} /></label><label>Start date<input type="date" value={obligation.start_date} onChange={(e) => setObligation({ ...obligation, start_date: e.target.value })} /></label><label>Required doc<select value={obligation.required_document_type} onChange={(e) => setObligation({ ...obligation, required_document_type: e.target.value })}>{docTypes.map((x) => <option key={x}>{x}</option>)}</select></label><label>Reminder days<input type="number" value={obligation.reminder_days} onChange={(e) => setObligation({ ...obligation, reminder_days: e.target.value })} /></label><textarea placeholder="remarks" value={obligation.remarks} onChange={(e) => setObligation({ ...obligation, remarks: e.target.value })} /><button>Save recurring obligation</button></form>; }
+
+type BillTab = "list" | "create" | "voucher";
+
+function BillsWorkspaceV21(props: Row) {
+  const { billId, bills, bill, setBill, entities, suppliers, selectedSuppliers, categories, billFiles, setBillFiles, uploading, onSaveBill, voucher, setVoucher, voucherItems, setVoucherItems, recurring, banks, onSaveVoucher, onFromBill, payment, setPayment, onSavePayment, vouchers, docs, links } = props;
+  const [tab, setTab] = useState<BillTab>("list");
+  const [selected, setSelected] = useState<Row | null>(null);
+  const awaiting = bills.filter((row: Row) => !["paid", "cancelled"].includes(row.payment_status));
+
+  useEffect(() => {
+    if (!billId || !bills.length) return;
+    const match = bills.find((row: Row) => row.id === billId);
+    if (match) setSelected(match);
+  }, [billId, bills]);
+
+  function beginVoucher(row: Row) {
+    onFromBill(row);
+    setTab("voucher");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  return <section>
+    <div className="section-heading">
+      <div><h2>Bills workspace</h2><p className="help">Use the list first. Open bill entry or payment preparation only when needed.</p></div>
+      <button type="button" className="primary primary-action" onClick={() => setTab("create")}>+ New Bill</button>
+    </div>
+    <PageTabs tabs={[{ id: "list", label: "Bill List", count: bills.length }, { id: "create", label: "Create Bill" }, { id: "voucher", label: "Create PV Draft", count: awaiting.length }]} active={tab} onChange={(id) => setTab(id as BillTab)} label="Bill workspace views" />
+
+    {tab === "list" && <BillListV21 rows={bills} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} />}
+    {tab === "create" && <Panel title="Create Supplier Bill"><BillForm bill={bill} setBill={setBill} save={onSaveBill} entities={entities} suppliers={selectedSuppliers} categories={categories} files={billFiles} setFiles={setBillFiles} uploading={uploading} /></Panel>}
+    {tab === "voucher" && <>
+      <Panel title="Bills Awaiting Payment">
+        {!awaiting.length ? <div className="empty">No unpaid bills are awaiting payment.</div> : <BillListV21 rows={awaiting} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} />}
+      </Panel>
+      <Panel title="Payment Voucher Draft">
+        <p className="form-note">Choose a bill above to prefill the draft, or enter a manual voucher. The voucher remains a draft until issued from Payment Vouchers.</p>
+        <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSaveVoucher} entities={entities} suppliers={suppliers.filter((row: Row) => row.active_status)} categories={categories} bills={bills} recurring={recurring} bankAccounts={banks} onCancel={() => { setVoucher({ ...emptyVoucher, entity_id: voucher.entity_id }); setVoucherItems([{ ...emptyItem }]); setTab("list"); }} />
+        <details className="advanced-section"><summary>Record an existing bill payment</summary><div className="advanced-section-body"><PaymentForm payment={payment} setPayment={setPayment} save={onSavePayment} bills={bills} vouchers={vouchers} /></div></details>
+      </Panel>
+    </>}
+
+    <DetailDrawer open={Boolean(selected)} title={selected?.description || "Bill details"} subtitle={selected?.bill_number || "No bill number"} onClose={() => setSelected(null)} footer={selected && <ActionGroup><button type="button" className="primary" onClick={() => { beginVoucher(selected); setSelected(null); }}>Create PV Draft</button><button type="button" className="neutral" onClick={() => setSelected(null)}>Close</button></ActionGroup>}>
+      {selected && <><div className="detail-grid"><FieldValue label="Entity">{entities.find((row: Row) => row.id === selected.entity_id)?.short_code}</FieldValue><FieldValue label="Supplier">{suppliers.find((row: Row) => row.id === selected.supplier_id)?.supplier_name}</FieldValue><FieldValue label="Bill date">{selected.bill_date}</FieldValue><FieldValue label="Due date">{selected.due_date}</FieldValue><FieldValue label="Total">{money(selected.total_amount)}</FieldValue><FieldValue label="Outstanding">{money(selected.outstanding_amount)}</FieldValue><FieldValue label="Status"><StatusBadge status={selected.payment_status} /></FieldValue><FieldValue label="Evidence">{selected.supporting_document_status}</FieldValue></div><section className="detail-section"><h3>Remarks</h3><p>{selected.remarks || "No remarks."}</p></section><section className="detail-section"><h3>Linked documents</h3><p>{links.filter((link: Row) => link.linked_record_type === "supplier_bill" && link.linked_record_id === selected.id).map((link: Row) => docs.find((doc: Row) => doc.id === link.document_id)?.original_filename).filter(Boolean).join(", ") || "No linked documents."}</p></section></>}
+    </DetailDrawer>
+  </section>;
+}
+
+function BillListV21({ rows, suppliers, entities, onView, onVoucher }: Row) {
+  if (!rows.length) return <div className="empty">No supplier bills match this view.</div>;
+  return <div className="record-list bill-record-list">
+    <div className="record-list-head"><span>Bill</span><span>Supplier / Entity</span><span>Amount / Due</span><span>Status</span><span>Actions</span></div>
+    {rows.map((row: Row) => <div className="record-row" key={row.id}><div className="record-row-main bill-list-row">
+      <div className="record-primary"><strong>{row.description}</strong><span>{row.bill_number || "No bill number"}</span></div>
+      <div className="record-primary"><strong>{suppliers.find((supplier: Row) => supplier.id === row.supplier_id)?.supplier_name || "No supplier"}</strong><span>{entities.find((entity: Row) => entity.id === row.entity_id)?.short_code || "No entity"}</span></div>
+      <div className="record-primary"><strong className="record-money">{money(row.total_amount)}</strong><span>Due {row.due_date || "not set"}</span></div>
+      <StatusBadge status={row.payment_status} />
+      <ActionGroup><button type="button" className="neutral" onClick={() => onView(row)}>View</button>{!["paid", "cancelled"].includes(row.payment_status) && <button type="button" className="primary" onClick={() => onVoucher(row)}>Create PV Draft</button>}</ActionGroup>
+    </div></div>)}
+  </div>;
+}
 
 type VoucherTab = "list" | "create" | "bills" | "cancelled";
 
@@ -385,7 +445,7 @@ function VoucherForm({ voucher, setVoucher, items, setItems, save, entities, sup
 function BillTable({ rows, entities, suppliers, onVoucher, docs, links }: Row) { return !rows.length ? <div className="empty">No bills yet.</div> : <table><thead><tr><th>Entity</th><th>Description</th><th>Supplier</th><th>Due</th><th>Status</th><th>Evidence</th><th>Total</th><th /></tr></thead><tbody>{rows.map((b: Row) => <tr key={b.id}><td>{entities.find((e: Row) => e.id === b.entity_id)?.short_code}</td><td><Demo row={b} /> {b.description}<br />{b.bill_number}</td><td>{suppliers.find((s: Row) => s.id === b.supplier_id)?.supplier_name}</td><td>{b.due_date}</td><td>{b.payment_status}</td><td>{b.supporting_document_status}<br />{links.filter((l: Row) => l.linked_record_type === "supplier_bill" && l.linked_record_id === b.id).map((l: Row) => docs.find((d: Row) => d.id === l.document_id)?.original_filename).filter(Boolean).join(", ")}</td><td>{money(b.total_amount)}</td><td><button onClick={() => void onVoucher(b)}>Create PV Draft</button></td></tr>)}</tbody></table>; }
 function VoucherListV2({ rows, items, entities, categories, docs, links, profiles, onIssue, onEdit, onDelete, onVoid, onView }: Row) {
   if (!rows.length) return <div className="empty">No payment vouchers match this view.</div>;
-  return <div className="record-list">
+  return <div className="record-list voucher-record-list">
     <div className="record-list-head"><span>Voucher No</span><span>Payee / Description</span><span>Amount</span><span>Date</span><span>Status</span><span>Actions</span></div>
     {rows.map((voucher: Row) => {
       const voucherItems = items.filter((item: Row) => item.payment_voucher_id === voucher.id);
@@ -396,22 +456,18 @@ function VoucherListV2({ rows, items, entities, categories, docs, links, profile
         <div className="record-secondary">{voucher.voucher_date}</div>
         <StatusBadge status={voucher.status} />
         <ActionGroup>
+          <button type="button" className="neutral" onClick={() => onView(voucher)}>View</button>
           {voucher.status === "draft" && <>
             <button type="button" className="primary" onClick={() => onEdit(voucher)}>Edit</button>
-            <button type="button" className="neutral" onClick={() => printVoucher(voucher, voucherItems, entities, categories, docs, links, profiles)}>Print Preview</button>
-            <button type="button" className="primary" onClick={() => void onIssue(voucher.id)}>Issue</button>
-            <button type="button" className="danger" onClick={() => void onDelete(voucher)}>Delete</button>
+            <MoreActions><button type="button" className="neutral" onClick={() => printVoucher(voucher, voucherItems, entities, categories, docs, links, profiles)}>Print Preview</button><button type="button" className="primary" onClick={() => void onIssue(voucher.id)}>Issue Voucher</button><button type="button" className="danger" onClick={() => void onDelete(voucher)}>Delete Draft</button></MoreActions>
           </>}
           {["issued", "paid"].includes(voucher.status) && <>
-            <button type="button" className="neutral" onClick={() => onView(voucher)}>View</button>
             <button type="button" className="neutral" onClick={() => printVoucher(voucher, voucherItems, entities, categories, docs, links, profiles)}>Print</button>
-            <button type="button" className="danger" onClick={() => void onVoid(voucher)}>Void / Cancel</button>
+            <MoreActions><button type="button" className="danger" onClick={() => void onVoid(voucher)}>Void / Cancel Voucher</button></MoreActions>
           </>}
           {voucher.status === "cancelled" && <>
-            <button type="button" className="neutral" onClick={() => onView(voucher)}>View</button>
             <button type="button" className="neutral" onClick={() => printVoucher(voucher, voucherItems, entities, categories, docs, links, profiles)}>Print</button>
           </>}
-          {!["draft", "issued", "paid", "cancelled"].includes(voucher.status) && <button type="button" className="neutral" onClick={() => onView(voucher)}>View</button>}
         </ActionGroup>
       </div></div>;
     })}
