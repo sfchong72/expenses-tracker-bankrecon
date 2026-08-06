@@ -324,7 +324,7 @@ export default function StudentImportPage() {
               <td>{batch.successful_rows}</td>
               <td>{batch.skipped_rows}</td>
               <td>{batch.failed_rows}</td>
-              <td>{["completed", "completed_with_errors"].includes(batch.status) ? <button className="danger" disabled={busy} onClick={() => void revertBatch(batch.id)}>Revert</button> : "â€”"}</td>
+              <td>{importHistoryAction(batch, busy, revertBatch)}</td>
             </tr>)}</tbody>
           </table>
         </div>
@@ -341,4 +341,12 @@ function uniqueWarnings(warnings: Row[]) {
     seen.add(warning.student_id);
     return true;
   });
+}
+
+function importHistoryAction(batch: Row, busy: boolean, revertBatch: (id: string) => Promise<void>) {
+  if (["completed", "completed_with_errors"].includes(batch.status)) {
+    return <button className="danger" disabled={busy} onClick={() => void revertBatch(batch.id)}>Revert</button>;
+  }
+  if (["mapping", "ready", "processing", "reverted"].includes(batch.status)) return <span className="help">Revert unavailable</span>;
+  return <span className="help">No action</span>;
 }

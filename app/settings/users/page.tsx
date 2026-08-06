@@ -6,6 +6,14 @@ import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, any>;
 
+function friendlyProfileUpdateError(message: string) {
+  const text = String(message || "");
+  if (/row-level security|permission denied|not allowed|policy/i.test(text)) {
+    return "Display name update requires RLS or database policy change.";
+  }
+  return text;
+}
+
 const staffRoles = ["finance_manager", "finance_staff", "data_entry", "read_only"];
 const roleHelp: Record<string, string> = {
   finance_manager: "Manage documents, recurring bills and voucher preparation. Bank balances still hidden.",
@@ -107,6 +115,10 @@ export default function UserSettingsPage() {
 
   async function createStaff(event: FormEvent) {
     event.preventDefault();
+    if (!createForm.email.trim() || !createForm.password || !createForm.role) {
+      setError("Email, temporary password and role are required.");
+      return;
+    }
     setBusy(true);
     setError("");
     const res = await fetch("/api/admin/users/create", {
@@ -120,14 +132,14 @@ export default function UserSettingsPage() {
       setError(body.error || "Staff login creation failed.");
       return;
     }
-    setMessage(`Staff login created for ${body.email}. Share the temporary password securely and ask them to change it later.`);
+    setMessage(`Staff login created for ${body.email}. Existing Users has been refreshed.`);
     setCreateForm({ email: "", displayName: "", password: "", role: "finance_staff", entityIds: [], permissions: defaultPermissions });
     await load();
   }
 
   async function saveStaff(event: FormEvent) {
     event.preventDefault();
-    if (!editForm || editForm.role === "owner") return;
+    if (!editForm) return;
     setBusy(true);
     setError("");
     const profileUpdate = await db.from("app_profiles").update({
@@ -135,7 +147,20 @@ export default function UserSettingsPage() {
       role: editForm.role,
       active_status: Boolean(editForm.active_status),
     }).eq("id", editForm.id);
-    if (profileUpdate.error) return finishError(profileUpdate.error.message);
+    if (profileUpdate.error) return finishError(friendlyProfileUpdateError(profileUpdate.error.message));
+
+    if (editForm.role === "owner") {
+      await db.from("audit_logs").insert({
+        action: "owner_profile_updated",
+        entity_type: "app_profile",
+        entity_id: editForm.id,
+        payload: { display_name: editForm.display_name || null },
+      });
+      setBusy(false);
+      setMessage("Owner display name updated. Printed documents will use display_name where available.");
+      await load();
+      return;
+    }
 
     const permissionUpdate = await db.from("finance_user_permissions").upsert({
       user_id: editForm.id,
@@ -205,10 +230,10 @@ export default function UserSettingsPage() {
         <section className="panel">
           <h2>Create Staff Tester Login</h2>
           <form onSubmit={createStaff}>
-            <label>Email<input type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} required /></label>
+            <label>Email <span className="required-mark">*</span><input type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} required /></label>
             <label>Display name<input value={createForm.displayName} onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })} /></label>
-            <label>Temporary password<input type="password" minLength={8} value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} required /></label>
-            <label>Role<select value={createForm.role} onChange={(e) => setCreateRole(e.target.value)}>{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{roleHelp[createForm.role]}</span></label>
+            <label>Temporary password <span className="required-mark">*</span><input type="password" minLength={8} value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} required /></label>
+            <label>Role <span className="required-mark">*</span><select value={createForm.role} onChange={(e) => setCreateRole(e.target.value)} required>{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{roleHelp[createForm.role]}</span></label>
             <fieldset className="wide">
               <legend>Entities for testing</legend>
               <div className="checkgrid">{entities.map((entity) => <label key={entity.id} className="inline"><input type="checkbox" checked={createForm.entityIds.includes(entity.id)} onChange={() => toggleCreateEntity(entity.id)} /> {entity.short_code}</label>)}</div>
@@ -228,18 +253,18 @@ export default function UserSettingsPage() {
 
       <section className="panel">
         <h2>Edit Staff Access</h2>
-        {!editForm ? <div className="empty">Select a staff user to edit.</div> : editForm.role === "owner" ? <div className="notice error"><p>Owner accounts are shown for reference only. Keep your owner Gmail active while staff testing.</p></div> : (
+        {!editForm ? <div className="empty">Select a user to edit.</div> : (
           <form onSubmit={saveStaff}>
             <label>Email<input value={editForm.email || ""} readOnly /></label>
             <label>Display name<input value={editForm.display_name || ""} onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })} /></label>
-            <label>Role<select value={editForm.role} onChange={(e) => setEditRole(e.target.value)}>{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{roleHelp[editForm.role]}</span></label>
+            <label>Role<select value={editForm.role} onChange={(e) => setEditRole(e.target.value)} disabled={editForm.role === "owner"}>{editForm.role === "owner" && <option value="owner">owner</option>}{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{editForm.role === "owner" ? "Owner role is protected here. You may update the display name only." : roleHelp[editForm.role]}</span></label>
             <label className="inline"><input type="checkbox" checked={Boolean(editForm.active_status)} onChange={(e) => setEditForm({ ...editForm, active_status: e.target.checked })} /> Active login allowed</label>
-            <fieldset className="wide">
+            {editForm.role !== "owner" && <fieldset className="wide">
               <legend>Assigned entities</legend>
               <div className="checkgrid">{entities.map((entity) => <label key={entity.id} className="inline"><input type="checkbox" checked={editForm.entityIds.includes(entity.id)} onChange={() => toggleEditEntity(entity.id)} /> {entity.short_code}</label>)}</div>
-            </fieldset>
-            <PermissionEditor permissions={editForm.permissions} setPermissions={(next) => setEditForm({ ...editForm, permissions: next })} />
-            <button disabled={busy}>{busy ? "Saving..." : "Save Staff Access"}</button>
+            </fieldset>}
+            {editForm.role !== "owner" && <PermissionEditor permissions={editForm.permissions} setPermissions={(next) => setEditForm({ ...editForm, permissions: next })} />}
+            <button disabled={busy}>{busy ? "Saving..." : editForm.role === "owner" ? "Save Owner Display Name" : "Save Staff Access"}</button>
           </form>
         )}
       </section>
