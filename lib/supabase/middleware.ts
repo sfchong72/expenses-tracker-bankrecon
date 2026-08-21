@@ -11,6 +11,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isLogin = pathname === "/login";
   const isForgotPassword = pathname === "/forgot-password";
+  const isResetPassword = pathname === "/reset-password";
   const isAuthCallback = pathname === "/auth/callback";
   const isForgotPasswordApi = pathname === "/api/auth/forgot-password";
   const isAccessDenied = pathname === "/access-denied";
@@ -55,7 +56,9 @@ export async function updateSession(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      if (isLogin || isForgotPassword || isForgotPasswordApi) return response;
+      // Recovery tokens arrive in the URL fragment, which is available only
+      // to the reset page in the browser and is never sent to middleware.
+      if (isLogin || isForgotPassword || isResetPassword || isForgotPasswordApi) return response;
       if (isApi) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }

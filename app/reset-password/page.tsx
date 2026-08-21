@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function ResetPasswordPage() {
@@ -9,10 +9,29 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recoveryReady, setRecoveryReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active && session) {
+        setRecoveryReady(true);
+        setError("");
+      }
+    });
+    void supabase.auth.getSession().then(({ data }) => {
+      if (active && data.session) setRecoveryReady(true);
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   async function updatePassword(event: FormEvent) {
     event.preventDefault();
     setError("");
+    if (!recoveryReady) { setError("Open the newest password-reset email link before choosing a new password."); return; }
     if (password.length < 8) { setError("New password must be at least 8 characters."); return; }
     if (password !== confirmPassword) { setError("The password confirmation does not match."); return; }
     setBusy(true);
@@ -33,7 +52,8 @@ export default function ResetPasswordPage() {
       <form onSubmit={updatePassword}>
         <label>New password <span className="required-mark">*</span><input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         <label>Confirm new password <span className="required-mark">*</span><input type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
-        <button className="primary" disabled={busy}>{busy ? "Updating..." : "Update Password"}</button>
+        {!recoveryReady && <p className="help">Waiting for a valid password-recovery session from the email link.</p>}
+        <button className="primary" disabled={busy || !recoveryReady}>{busy ? "Updating..." : "Update Password"}</button>
       </form>
     </section>
   </main>;

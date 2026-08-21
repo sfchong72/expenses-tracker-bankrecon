@@ -1,4 +1,5 @@
 const LOCAL_ORIGIN = "http://localhost:3000";
+const CANONICAL_PRODUCTION_ORIGIN = "https://interexcel-hub.vercel.app";
 
 function normalizeOrigin(value: string | undefined) {
   const candidate = value?.trim();
@@ -10,15 +11,6 @@ function normalizeOrigin(value: string | undefined) {
     return url.origin;
   } catch {
     return null;
-  }
-}
-
-function isLocalOrigin(origin: string) {
-  try {
-    const hostname = new URL(origin).hostname;
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-  } catch {
-    return false;
   }
 }
 
@@ -35,10 +27,8 @@ export function resolveApplicationOrigin(request: Request) {
   if (process.env.VERCEL_ENV === "preview" && vercelDeploymentOrigin) return vercelDeploymentOrigin;
 
   if (process.env.VERCEL_ENV === "production") {
-    if (configuredSiteOrigin && !isLocalOrigin(configuredSiteOrigin)) return configuredSiteOrigin;
-    const productionOrigin = normalizeOrigin(process.env.VERCEL_PROJECT_PRODUCTION_URL);
-    if (productionOrigin) return productionOrigin;
-    if (vercelDeploymentOrigin) return vercelDeploymentOrigin;
+    if (configuredSiteOrigin === CANONICAL_PRODUCTION_ORIGIN) return configuredSiteOrigin;
+    return CANONICAL_PRODUCTION_ORIGIN;
   }
 
   const requestOrigin = normalizeOrigin(new URL(request.url).origin);
@@ -47,8 +37,5 @@ export function resolveApplicationOrigin(request: Request) {
 }
 
 export function passwordResetRedirectUrl(request: Request) {
-  const callback = new URL("/auth/callback", resolveApplicationOrigin(request));
-  callback.searchParams.set("next", "/reset-password");
-  return callback.toString();
+  return new URL("/reset-password", resolveApplicationOrigin(request)).toString();
 }
-
