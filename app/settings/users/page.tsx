@@ -34,6 +34,8 @@ export default function UserSettingsPage() {
   const [message, setMessage] = useState("Loading staff access...");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState("");
+  const [deleteEligibility, setDeleteEligibility] = useState<{ eligible: boolean; dependencyCount: number; reason: string } | null>(null);
   const [activeTab, setActiveTab] = useState("users");
   const [createForm, setCreateForm] = useState({
     email: "",
@@ -96,6 +98,51 @@ export default function UserSettingsPage() {
         can_view_bank_balances: false,
       },
     });
+    setDeleteEligibility(null);
+    if (profile.role !== "owner") void checkDeleteEligibility(profile.id);
+  }
+
+  async function checkDeleteEligibility(userId: string) {
+    const response = await fetch("/api/admin/users/lifecycle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "eligibility", userId }),
+    });
+    const body = await response.json();
+    setDeleteEligibility(response.ok ? body : { eligible: false, dependencyCount: 0, reason: body.error || "Deletion eligibility could not be verified safely. Deactivate the account instead." });
+  }
+
+  async function manageAccount(action: "send_password_reset" | "deactivate" | "reactivate" | "delete") {
+    if (!editForm) return;
+    const prompt = action === "send_password_reset"
+      ? `Send official password-reset instructions to ${editForm.email}?`
+      : action === "deactivate"
+        ? `Deactivate login for ${editForm.email}? Historical records and access settings will be preserved.`
+        : action === "reactivate"
+          ? `Reactivate login for ${editForm.email}? Existing role and entity assignments will be preserved.`
+          : `Permanently delete the eligible test account ${editForm.email}? This cannot be undone.`;
+    if (!window.confirm(prompt)) return;
+
+    setLifecycleBusy(action);
+    setError("");
+    const response = await fetch("/api/admin/users/lifecycle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, userId: editForm.id }),
+    });
+    const body = await response.json();
+    setLifecycleBusy("");
+    if (!response.ok) { setError(body.error || "The account action could not be completed."); return; }
+    if (action === "delete") {
+      setSelectedId("");
+      setEditForm(null);
+      setDeleteEligibility(null);
+    } else if (action === "deactivate" || action === "reactivate") {
+      setEditForm({ ...editForm, active_status: action === "reactivate" });
+      await checkDeleteEligibility(editForm.id);
+    }
+    await load();
+    setMessage(body.message);
   }
 
   function toggleCreateEntity(entityId: string) {
@@ -251,7 +298,12 @@ export default function UserSettingsPage() {
               <div className="checkgrid">{entities.map((entity) => <label key={entity.id} className="inline"><input type="checkbox" checked={editForm.entityIds.includes(entity.id)} onChange={() => toggleEditEntity(entity.id)} /> {entity.short_code}</label>)}</div>
             </fieldset>
             <PermissionEditor permissions={editForm.permissions} setPermissions={(next) => setEditForm({ ...editForm, permissions: next })} />
-            <button disabled={busy}>{busy ? "Saving..." : "Save Staff Access"}</button>
+            <div className="actions wide"><button disabled={busy || Boolean(lifecycleBusy)}>{busy ? "Saving..." : "Save Staff Access"}</button><button type="button" className="neutral" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("send_password_reset")}>{lifecycleBusy === "send_password_reset" ? "Sending..." : "Send Password Reset"}</button>{editForm.active_status ? <button type="button" className="danger" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("deactivate")}>{lifecycleBusy === "deactivate" ? "Deactivating..." : "Deactivate Login"}</button> : <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("reactivate")}>{lifecycleBusy === "reactivate" ? "Reactivating..." : "Reactivate Login"}</button>}</div>
+            <div className="wide lifecycle-box">
+              <strong>Delete test account</strong>
+              <p className="help">{deleteEligibility?.reason || "Checking for protected historical dependencies..."}</p>
+              <button type="button" className="danger" disabled={!deleteEligibility?.eligible || Boolean(lifecycleBusy)} onClick={() => void manageAccount("delete")}>{lifecycleBusy === "delete" ? "Deleting..." : "Delete Test Account"}</button>
+            </div>
           </form>
         )}
       </section></>}

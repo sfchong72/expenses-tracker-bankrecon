@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -16,6 +17,8 @@ export default function LoginPage() {
     const reason = params.get("error");
     if (reason === "no_profile") setError("Access denied: no application profile exists for this login.");
     if (reason === "inactive") setError("Access denied: this user account is inactive.");
+    if (reason === "reset_link") setError("This password-reset link is invalid or has expired. Request a new link.");
+    if (params.get("reset") === "success") setMessage("Password updated. Sign in with your new password.");
   }, []);
 
   async function signIn(e: FormEvent) {
@@ -75,6 +78,7 @@ export default function LoginPage() {
             <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
             <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
             <button disabled={busy}>Sign in</button>
+            <Link className="form-link" href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}>Forgot password?</Link>
           </form>
         </div>
 

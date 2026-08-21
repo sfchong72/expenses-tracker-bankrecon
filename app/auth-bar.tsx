@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -43,6 +44,7 @@ export function AuthBar() {
     <div className="authbar">
       <span>{profile?.display_name || profile?.email || "Signed in"}</span>
       <strong>{profile?.role || "loading"}</strong>
+      <Link className="auth-link" href="/account">Account</Link>
       <button onClick={logout}>Logout</button>
     </div>
   );

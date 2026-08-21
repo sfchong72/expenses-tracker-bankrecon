@@ -68,6 +68,7 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 800;
 .demo-actions { justify-content: flex-end; }
 .help { color: var(--muted); margin: 6px 0; font-size: 13px; }
 .error-text { color: var(--danger); margin: 4px 0; font-size: 12px; }
+.field-error { color: var(--danger); margin: 8px 0; font-size: 13px; font-weight: 800; }
 .tag { display: inline-block; margin-right: 6px; padding: 3px 7px; border: 1px solid var(--gold); color: #604915; background: #fff7df; border-radius: 999px; font-size: 11px; }
 
 .metrics { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
@@ -75,6 +76,8 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 800;
 .authbar { display: flex; gap: 9px; align-items: center; justify-content: flex-end; color: var(--muted); font-size: 13px; }
 .authbar strong { text-transform: uppercase; color: var(--purple); }
 .authbar button { min-height: 34px; background: #2f2f33; border-color: #2f2f33; }
+.auth-link, .form-link { color: var(--purple-dark); font-size: 13px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.form-link { align-self: center; justify-self: start; }
 
 .notice { border: 1px solid var(--line); background: var(--surface); padding: 13px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; border-left: 4px solid var(--gold); border-radius: 10px; }
 .notice p { margin: 0; }
@@ -251,6 +254,9 @@ body > main > *, .panel, .record-list, .section-heading, .sticky-toolbar, .grid 
 .more-actions-menu > button, .more-actions-menu > a { width: 100%; justify-content: flex-start; }
 .entity-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .entity-chip { display: inline-flex; padding: 3px 7px; border-radius: 999px; background: #f0e9f6; color: var(--purple-dark); font-size: 11px; font-weight: 800; }
+.auth-panel { max-width: 720px; }
+.lifecycle-box { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+.lifecycle-box button { justify-self: start; }
 
 .status-badge { width: fit-content; max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 3px 8px; border: 1px solid #d7d3da; border-radius: 999px; background: #f1eff2; color: #53505a; font-size: 11px; font-weight: 900; line-height: 1.2; }
 .status-draft, .status-incomplete { background: #f1f0f3; color: #52515a; border-color: #d8d6dc; }

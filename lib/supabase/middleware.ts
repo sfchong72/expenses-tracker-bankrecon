@@ -10,6 +10,8 @@ type CookieToSet = {
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isLogin = pathname === "/login";
+  const isForgotPassword = pathname === "/forgot-password";
+  const isAuthCallback = pathname === "/auth/callback";
   const isAccessDenied = pathname === "/access-denied";
   const isApi = pathname.startsWith("/api/");
   const supabaseResponse = NextResponse.next({ request });
@@ -44,12 +46,15 @@ export async function updateSession(request: NextRequest) {
       },
     });
 
+    // The callback must exchange its one-time code before a user session exists.
+    if (isAuthCallback) return response;
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      if (isLogin) return response;
+      if (isLogin || isForgotPassword) return response;
       if (isApi) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }

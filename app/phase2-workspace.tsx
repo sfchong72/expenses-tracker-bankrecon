@@ -84,6 +84,7 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
   const entityName = (id: string) => entities.find((e) => e.id === id)?.short_code ?? "-";
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.supplier_name ?? "-";
   const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? "-";
+  const rememberCategory = (category: Row) => setCategories((current) => [...current.filter((row) => row.id !== category.id), category].sort((a, b) => String(a.name).localeCompare(String(b.name))));
   const recordRows = recordsFor(upload.linked_record_type, upload.entity_id);
   const docsFor = (type: string, id: string) => links.filter((l) => l.linked_record_type === type && l.linked_record_id === id).map((l) => docs.find((d) => d.id === l.document_id)?.original_filename).filter(Boolean).join(", ");
 
@@ -242,9 +243,9 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
 
   return <main className="page-shell"><div className="shortcut-bar"><Link href="/suppliers">Suppliers</Link><Link href="/bills">Bills</Link><Link href="/recurring">Recurring</Link><Link href="/payment-vouchers">Payment Vouchers</Link><Link href="/documents">Documents</Link><Link href="/missing-documents">Missing Documents</Link></div><section className="page-hero"><div><span className="eyebrow">Finance Operations</span><h1>{title}</h1><p className="subtitle">{description}</p></div><div className="hero-stats"><strong>{bills.length} bills</strong><strong>{bills.filter((b) => b.due_date <= today && b.payment_status !== "paid").length} due soon</strong><strong>{docs.length} docs</strong></div></section><div className="status-bar"><span>{error || message}</span><span className="actions"><label className="inline"><input type="checkbox" checked={showDemo} onChange={(e) => setShowDemo(e.target.checked)} /> DEMO view</label><button className="neutral" onClick={() => void load()}>Refresh</button></span></div>
     {mode === "suppliers" && <section className="grid"><Panel title="Supplier / Payee"><SupplierForm supplier={supplier} setSupplier={setSupplier} save={saveSupplier} entities={entities} categories={categories} /></Panel><Panel title="Supplier List" action={<span className="actions"><button onClick={() => void demoAction("load")}>Load Phase 2 Demo Data</button><button onClick={() => void demoAction("remove")}>Remove Phase 2 Demo Data</button></span>}><SupplierTable rows={suppliers} entities={entities} supplierEntities={supplierEntities} setSupplier={setSupplier} toggleSupplier={toggleSupplier} /></Panel></section>}
-    {mode === "bills" && <BillsWorkspaceV21 billId={billId} bills={bills} bill={bill} setBill={setBill} entities={entities} suppliers={suppliers} selectedSuppliers={selectedSuppliers} categories={categories} billFiles={billFiles} setBillFiles={setBillFiles} uploading={uploading} onSaveBill={saveBill} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} recurring={recurring} banks={banks} onSaveVoucher={saveVoucherDraft} onFromBill={createFromBill} payment={payment} setPayment={setPayment} onSavePayment={savePayment} vouchers={vouchers} docs={docs} links={links} />}
+    {mode === "bills" && <BillsWorkspaceV21 billId={billId} bills={bills} bill={bill} setBill={setBill} entities={entities} suppliers={suppliers} selectedSuppliers={selectedSuppliers} categories={categories} billFiles={billFiles} setBillFiles={setBillFiles} uploading={uploading} onSaveBill={saveBill} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} recurring={recurring} banks={banks} onSaveVoucher={saveVoucherDraft} onFromBill={createFromBill} payment={payment} setPayment={setPayment} onSavePayment={savePayment} vouchers={vouchers} docs={docs} links={links} onCategoryAdded={rememberCategory} />}
     {mode === "recurring" && <section className="grid"><Panel title="Recurring Obligation"><RecurringForm obligation={obligation} setObligation={setObligation} save={saveRecurring} entities={entities} suppliers={activeSuppliers(obligation.entity_id)} /></Panel><Panel title="Monthly Drafts" action={<button onClick={generateDrafts}>Generate Monthly Drafts</button>}>{!recurring.length ? <div className="empty">Nothing to show.</div> : recurring.map((r) => <div key={r.id} className="list-row"><b>{r.description}</b><span>{supplierName(r.supplier_id)} - day {r.due_day} - {money(r.expected_amount)}</span></div>)}</Panel></section>}
-    {mode === "vouchers" && <VoucherWorkspaceV2 vouchers={vouchers} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} items={items} entities={entities} suppliers={suppliers} activeSuppliers={activeSuppliers} categories={categories} bills={bills} recurring={recurring} banks={banks} docs={docs} links={links} profiles={profiles} onSave={saveVoucherDraft} onIssue={issueVoucher} onEdit={editVoucher} onDelete={deleteVoucher} onVoid={voidVoucher} onFromBill={createFromBill} />}
+    {mode === "vouchers" && <VoucherWorkspaceV2 vouchers={vouchers} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} items={items} entities={entities} suppliers={suppliers} activeSuppliers={activeSuppliers} categories={categories} bills={bills} recurring={recurring} banks={banks} docs={docs} links={links} profiles={profiles} onSave={saveVoucherDraft} onIssue={issueVoucher} onEdit={editVoucher} onDelete={deleteVoucher} onVoid={voidVoucher} onFromBill={createFromBill} onCategoryAdded={rememberCategory} />}
     {mode === "documents" && <section className="grid"><Panel title="Upload Documents"><form onSubmit={uploadLibrary}><p className="wide help">The normal invoice workflow starts from Supplier Bills. This library is for secondary uploads and document review.</p><Select label="Entity" value={upload.entity_id} onChange={(v: string) => setUpload({ ...upload, entity_id: v, linked_record_id: "" })} rows={entities} /><label>Document type<select value={upload.document_type} onChange={(e) => setUpload({ ...upload, document_type: e.target.value })}>{docTypes.map((x) => <option key={x}>{x}</option>)}</select></label><label>Linked type<select value={upload.linked_record_type} onChange={(e) => setUpload({ ...upload, linked_record_type: e.target.value, linked_record_id: "" })}>{linkTypes.map((x) => <option key={x}>{x}</option>)}</select></label><Select label="Record" value={upload.linked_record_id} onChange={(v: string) => setUpload({ ...upload, linked_record_id: v })} rows={recordRows} required={false} empty="Choose" />{!recordRows.length && <p className="wide help">No {upload.linked_record_type.replaceAll("_", " ")} records available. Create the required record first.</p>}<Link href={upload.linked_record_type === "payment_voucher" ? "/payment-vouchers" : upload.linked_record_type === "recurring_obligation" ? "/recurring" : "/bills"}>Create required record</Link><label className="wide">Desktop files<input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/*" onChange={(e) => setLibraryFiles(Array.from(e.target.files ?? []))} /></label><label className="wide">Phone camera - supported mobile devices only<input type="file" accept="image/*" capture="environment" onChange={(e) => setLibraryFiles([...(libraryFiles ?? []), ...Array.from(e.target.files ?? [])])} /></label><FilePreview files={libraryFiles} /><button disabled={uploading || !libraryFiles.length || !upload.linked_record_id}>{uploading ? "Uploading..." : "Upload Documents"}</button></form></Panel><Panel title="Documents">{docs.map((d) => <div key={d.id} className="list-row"><b><Demo row={d} />{d.original_filename}</b><span>{d.document_type} - {Math.round(Number(d.file_size || 0) / 1024)} KB</span><button onClick={() => void downloadDoc(d.id)}>Preview / Download</button></div>)}</Panel></section>}
     {mode === "missing" && <section className="grid"><Panel title="Missing-document tracking"><div className="checkgrid"><Metric label="Bills with no invoice" value={bills.filter((b) => !docsFor("supplier_bill", b.id).includes(".")).length} /><Metric label="Recurring without voucher" value={recurring.filter((r) => !vouchers.some((v) => v.recurring_obligation_id === r.id)).length} /><Metric label="Paid bills without slip" value={bills.filter((b) => b.payment_status === "paid" && !docsFor("supplier_bill", b.id).includes("payment")).length} /><Metric label="Claim evidence gaps" value={missingClaimEvidence.length} /><Metric label="Partial evidence" value={bills.filter((b) => b.supporting_document_status === "partial_evidence").length} /><Metric label="Not applicable" value={bills.filter((b) => b.supporting_document_status === "not_applicable").length} /><Metric label="Incomplete for audit" value={missing.length + missingClaimEvidence.length} /></div></Panel><Panel title="Claims missing evidence">{missingClaimEvidence.length ? <table><thead><tr><th>Claim</th><th>Line</th><th>Evidence needed</th><th /></tr></thead><tbody>{missingClaimEvidence.map((line) => { const claim = claims.find((item) => item.id === line.claim_id); return <tr key={line.id}><td>{claim?.claim_number || "Draft"}<br />{claim?.claimant_name}</td><td>{line.description}</td><td>{line.line_type === "mileage" ? "Route screenshot" : line.line_type === "accommodation" ? "Hotel invoice / receipt" : line.line_type === "credit_card_transaction" ? "Receipt or redacted statement" : "Receipt"}</td><td><Link href={`/claims/${line.claim_id}`}>Open claim</Link></td></tr>; })}</tbody></table> : <div className="empty">No claim evidence gaps.</div>}</Panel></section>}
   </main>;
@@ -268,7 +269,7 @@ function RecurringForm({ obligation, setObligation, save, entities, suppliers }:
 type BillTab = "list" | "create" | "voucher";
 
 function BillsWorkspaceV21(props: Row) {
-  const { billId, bills, bill, setBill, entities, suppliers, selectedSuppliers, categories, billFiles, setBillFiles, uploading, onSaveBill, voucher, setVoucher, voucherItems, setVoucherItems, recurring, banks, onSaveVoucher, onFromBill, payment, setPayment, onSavePayment, vouchers, docs, links } = props;
+  const { billId, bills, bill, setBill, entities, suppliers, selectedSuppliers, categories, billFiles, setBillFiles, uploading, onSaveBill, voucher, setVoucher, voucherItems, setVoucherItems, recurring, banks, onSaveVoucher, onFromBill, payment, setPayment, onSavePayment, vouchers, docs, links, onCategoryAdded } = props;
   const [tab, setTab] = useState<BillTab>("list");
   const [selected, setSelected] = useState<Row | null>(null);
   const voucherDraftRef = useRef<HTMLDivElement>(null);
@@ -302,7 +303,7 @@ function BillsWorkspaceV21(props: Row) {
       <div ref={voucherDraftRef}>
       <Panel title="Payment Voucher Draft">
         <p className="form-note">Choose a bill above to prefill the draft, or enter a manual voucher. The voucher remains a draft until issued from Payment Vouchers.</p>
-        <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSaveVoucher} entities={entities} suppliers={suppliers.filter((row: Row) => row.active_status)} categories={categories} bills={bills} recurring={recurring} bankAccounts={banks} onCancel={() => { setVoucher({ ...emptyVoucher, entity_id: voucher.entity_id }); setVoucherItems([{ ...emptyItem }]); setTab("list"); }} />
+        <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSaveVoucher} entities={entities} suppliers={suppliers.filter((row: Row) => row.active_status)} categories={categories} bills={bills} recurring={recurring} bankAccounts={banks} onCategoryAdded={onCategoryAdded} onCancel={() => { setVoucher({ ...emptyVoucher, entity_id: voucher.entity_id }); setVoucherItems([{ ...emptyItem }]); setTab("list"); }} />
         <details className="advanced-section"><summary>Record an existing bill payment</summary><div className="advanced-section-body"><PaymentForm payment={payment} setPayment={setPayment} save={onSavePayment} bills={bills} vouchers={vouchers} /></div></details>
       </Panel>
       </div>
@@ -331,7 +332,7 @@ function BillListV21({ rows, suppliers, entities, onView, onVoucher }: Row) {
 type VoucherTab = "list" | "create" | "bills" | "cancelled";
 
 function VoucherWorkspaceV2(props: Row) {
-  const { vouchers, voucher, setVoucher, voucherItems, setVoucherItems, items, entities, suppliers, activeSuppliers, categories, bills, recurring, banks, docs, links, profiles, onSave, onIssue, onEdit, onDelete, onVoid, onFromBill } = props;
+  const { vouchers, voucher, setVoucher, voucherItems, setVoucherItems, items, entities, suppliers, activeSuppliers, categories, bills, recurring, banks, docs, links, profiles, onSave, onIssue, onEdit, onDelete, onVoid, onFromBill, onCategoryAdded } = props;
   const [tab, setTab] = useState<VoucherTab>("list");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
@@ -381,7 +382,7 @@ function VoucherWorkspaceV2(props: Row) {
     </>}
 
     {tab === "create" && <Panel title={voucher.id ? `Edit Draft ${voucher.voucher_number || "Voucher"}` : "Create Voucher"}>
-      <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSave} entities={entities} suppliers={activeSuppliers(voucher.entity_id)} categories={categories} bills={bills} recurring={recurring} bankAccounts={banks} onCancel={cancelForm} />
+      <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSave} entities={entities} suppliers={activeSuppliers(voucher.entity_id)} categories={categories} bills={bills} recurring={recurring} bankAccounts={banks} onCategoryAdded={onCategoryAdded} onCancel={cancelForm} />
     </Panel>}
 
     {tab === "bills" && <Panel title="Bills Awaiting Payment">
@@ -402,8 +403,47 @@ function VoucherWorkspaceV2(props: Row) {
   </section>;
 }
 
-function VoucherForm({ voucher, setVoucher, items, setItems, save, entities, suppliers, categories, bills, recurring, bankAccounts, onCancel }: Row) {
+function VoucherForm({ voucher, setVoucher, items, setItems, save, entities, suppliers, categories, bills, recurring, bankAccounts, onCategoryAdded, onCancel }: Row) {
   const total = items.reduce((sum: number, item: Row) => sum + Number(item.amount || 0), 0);
+  const [categoryItemIndex, setCategoryItemIndex] = useState<number | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
+
+  function chooseCategory(index: number, value: string) {
+    if (value === "__add_category__") {
+      setCategoryItemIndex(index);
+      setNewCategoryName("");
+      setCategoryError("");
+      return;
+    }
+    setItems(items.map((row: Row, itemIndex: number) => itemIndex === index ? { ...row, expense_category_id: value } : row));
+  }
+
+  async function addCategory() {
+    const name = newCategoryName.trim();
+    if (!name) { setCategoryError("Category name is required."); return; }
+    setSavingCategory(true);
+    setCategoryError("");
+    try {
+      const response = await fetch("/api/finance/expense-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = await response.json();
+      if (!response.ok) { setCategoryError(body.error || "Expense category could not be created."); return; }
+      onCategoryAdded(body.category);
+      setItems(items.map((row: Row, itemIndex: number) => itemIndex === categoryItemIndex ? { ...row, expense_category_id: body.category.id } : row));
+      setCategoryItemIndex(null);
+      setNewCategoryName("");
+    } catch {
+      setCategoryError("Expense category could not be created. Please try again.");
+    } finally {
+      setSavingCategory(false);
+    }
+  }
+
   return <form onSubmit={save}>
     <fieldset className="form-section"><legend>General</legend>
       <Select label="Entity" value={voucher.entity_id} onChange={(value: string) => setVoucher({ ...voucher, entity_id: value, supplier_id: "" })} rows={entities} />
@@ -426,7 +466,7 @@ function VoucherForm({ voucher, setVoucher, items, setItems, save, entities, sup
       <div className="wide mini"><div className="section-heading"><b>Itemised payment rows</b><strong className="record-money">Total {money(total)}</strong></div>
         {items.map((item: Row, index: number) => <div className="itemrow" key={index}>
           <input aria-label={`Item ${index + 1} description`} placeholder="Description" value={item.description} onChange={(event) => setItems(items.map((row: Row, itemIndex: number) => itemIndex === index ? { ...row, description: event.target.value } : row))} />
-          <select aria-label={`Item ${index + 1} category`} value={item.expense_category_id} onChange={(event) => setItems(items.map((row: Row, itemIndex: number) => itemIndex === index ? { ...row, expense_category_id: event.target.value } : row))}><option value="">Category</option>{categories.map((category: Row) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
+          <select aria-label={`Item ${index + 1} category`} value={item.expense_category_id} onChange={(event) => chooseCategory(index, event.target.value)}><option value="">Category</option>{categories.filter((category: Row) => category.active_status).map((category: Row) => <option key={category.id} value={category.id}>{category.name}</option>)}<option value="__add_category__">+ Add new category</option></select>
           <select aria-label={`Item ${index + 1} related bill`} value={item.supplier_bill_id} onChange={(event) => setItems(items.map((row: Row, itemIndex: number) => itemIndex === index ? { ...row, supplier_bill_id: event.target.value } : row))}><option value="">Related bill</option>{bills.map((bill: Row) => <option key={bill.id} value={bill.id}>{bill.description}</option>)}</select>
           <input aria-label={`Item ${index + 1} amount`} type="number" step="0.01" placeholder="Amount" value={item.amount} onChange={(event) => setItems(items.map((row: Row, itemIndex: number) => itemIndex === index ? { ...row, amount: event.target.value } : row))} />
           <button type="button" className="danger" onClick={() => setItems(items.filter((_: Row, itemIndex: number) => itemIndex !== index))}>Remove</button>
@@ -443,6 +483,12 @@ function VoucherForm({ voucher, setVoucher, items, setItems, save, entities, sup
     </div></details>
 
     <div className="form-footer"><button type="button" className="neutral" onClick={onCancel}>Cancel</button><button type="submit" className="primary">{voucher.id ? "Update Voucher Draft" : "Save Voucher Draft"}</button></div>
+
+    <DetailDrawer open={categoryItemIndex !== null} title="Add expense category" subtitle="The new category will be shared across Finance Operations." onClose={() => { if (!savingCategory) setCategoryItemIndex(null); }} footer={<ActionGroup><button type="button" className="neutral" disabled={savingCategory} onClick={() => setCategoryItemIndex(null)}>Cancel</button><button type="button" className="primary" disabled={savingCategory} onClick={() => void addCategory()}>{savingCategory ? "Saving..." : "Add Category"}</button></ActionGroup>}>
+      <label>Category name <span className="required-mark">*</span><input autoFocus value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addCategory(); } }} /></label>
+      {categoryError && <p className="field-error" role="alert">{categoryError}</p>}
+      <p className="help">Whitespace is trimmed and category names are checked case-insensitively to prevent obvious duplicates. Other voucher fields remain unchanged.</p>
+    </DetailDrawer>
   </form>;
 }
 function BillTable({ rows, entities, suppliers, onVoucher, docs, links }: Row) { return !rows.length ? <div className="empty">No bills yet.</div> : <table><thead><tr><th>Entity</th><th>Description</th><th>Supplier</th><th>Due</th><th>Status</th><th>Evidence</th><th>Total</th><th /></tr></thead><tbody>{rows.map((b: Row) => <tr key={b.id}><td>{entities.find((e: Row) => e.id === b.entity_id)?.short_code}</td><td><Demo row={b} /> {b.description}<br />{b.bill_number}</td><td>{suppliers.find((s: Row) => s.id === b.supplier_id)?.supplier_name}</td><td>{b.due_date}</td><td>{b.payment_status}</td><td>{b.supporting_document_status}<br />{links.filter((l: Row) => l.linked_record_type === "supplier_bill" && l.linked_record_id === b.id).map((l: Row) => docs.find((d: Row) => d.id === l.document_id)?.original_filename).filter(Boolean).join(", ")}</td><td>{money(b.total_amount)}</td><td><button onClick={() => void onVoucher(b)}>Create PV Draft</button></td></tr>)}</tbody></table>; }
