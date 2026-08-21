@@ -78,6 +78,9 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 800;
 .authbar button { min-height: 34px; background: #2f2f33; border-color: #2f2f33; }
 .auth-link, .form-link { color: var(--purple-dark); font-size: 13px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 .form-link { align-self: center; justify-self: start; }
+.forgot-password-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid #d8c7e5; border-radius: 8px; background: #f6f0fa; }
+.forgot-password-row span { color: var(--muted); font-size: 12px; }
+.forgot-password-link { color: var(--purple-dark); font-size: 14px; font-weight: 900; text-decoration: underline; text-underline-offset: 3px; }
 
 .notice { border: 1px solid var(--line); background: var(--surface); padding: 13px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; border-left: 4px solid var(--gold); border-radius: 10px; }
 .notice p { margin: 0; }
@@ -257,6 +260,10 @@ body > main > *, .panel, .record-list, .section-heading, .sticky-toolbar, .grid 
 .auth-panel { max-width: 720px; }
 .lifecycle-box { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
 .lifecycle-box button { justify-self: start; }
+.account-actions-box { border-color: #d8c7e5; background: #faf6fc; scroll-margin-top: 18px; }
+.account-actions-box .actions { justify-content: flex-start; }
+.eligibility-safe { color: #2b6a38; font-weight: 800; }
+.eligibility-warning { color: var(--danger); font-weight: 800; }
 
 .status-badge { width: fit-content; max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 3px 8px; border: 1px solid #d7d3da; border-radius: 999px; background: #f1eff2; color: #53505a; font-size: 11px; font-weight: 900; line-height: 1.2; }
 .status-draft, .status-incomplete { background: #f1f0f3; color: #52515a; border-color: #d8d6dc; }

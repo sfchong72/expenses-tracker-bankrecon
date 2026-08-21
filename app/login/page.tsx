@@ -77,8 +77,11 @@ export default function LoginPage() {
           <form onSubmit={signIn}>
             <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
             <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+            <div className="wide forgot-password-row">
+              <Link className="forgot-password-link" href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}>Forgot password?</Link>
+              <span>Request an official password-reset email.</span>
+            </div>
             <button disabled={busy}>Sign in</button>
-            <Link className="form-link" href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}>Forgot password?</Link>
           </form>
         </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AuthBar } from "@/app/auth-bar";
 import { ActionGroup, PageTabs, StatusBadge } from "@/app/ui-v2";
 import { createClient } from "@/lib/supabase/client";
@@ -37,6 +37,7 @@ export default function UserSettingsPage() {
   const [lifecycleBusy, setLifecycleBusy] = useState("");
   const [deleteEligibility, setDeleteEligibility] = useState<{ eligible: boolean; dependencyCount: number; reason: string } | null>(null);
   const [activeTab, setActiveTab] = useState("users");
+  const editPanelRef = useRef<HTMLElement>(null);
   const [createForm, setCreateForm] = useState({
     email: "",
     displayName: "",
@@ -85,7 +86,7 @@ export default function UserSettingsPage() {
     };
   }
 
-  function openEdit(profile?: Row, loadedAccess = access, loadedPermissions = permissions) {
+  function openEdit(profile?: Row, loadedAccess = access, loadedPermissions = permissions, reveal = false) {
     if (!profile) return;
     setSelectedId(profile.id);
     const permission = loadedPermissions.find((row) => row.user_id === profile.id) ?? roleDefaults(profile.role);
@@ -100,6 +101,7 @@ export default function UserSettingsPage() {
     });
     setDeleteEligibility(null);
     if (profile.role !== "owner") void checkDeleteEligibility(profile.id);
+    if (reveal) window.setTimeout(() => editPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   async function checkDeleteEligibility(userId: string) {
@@ -282,15 +284,27 @@ export default function UserSettingsPage() {
       {activeTab === "users" && <>
         <section className="panel">
           <h2>Existing Users</h2>
-          <UserTable rows={profiles} access={access} entities={entities} onEdit={openEdit} />
+          <UserTable rows={profiles} access={access} entities={entities} onEdit={(profile: Row) => openEdit(profile, access, permissions, true)} />
         </section>
 
-      <section className="panel">
-        <h2>Edit Staff Access</h2>
+      <section className="panel" ref={editPanelRef}>
+        <h2>Edit User / Account Actions</h2>
         {!editForm ? <div className="empty">Select a staff user to edit.</div> : editForm.role === "owner" ? <form onSubmit={saveStaff}><p className="form-note">Owner login, role and entity access remain unchanged. Only the display name will be updated.</p><label>Email<input value={editForm.email || ""} readOnly /></label><label>Display name<input value={editForm.display_name || ""} onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })} /></label><button disabled={busy}>{busy ? "Saving..." : "Save Owner Display Name"}</button></form> : (
           <form onSubmit={saveStaff}>
             <label>Email<input value={editForm.email || ""} readOnly /></label>
             <label>Display name<input value={editForm.display_name || ""} onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })} /></label>
+            <section className="wide lifecycle-box account-actions-box" aria-labelledby="account-actions-heading">
+              <div>
+                <strong id="account-actions-heading">Account Actions</strong>
+                <p className="help">Owner-only password recovery and login lifecycle controls. Historical records remain protected.</p>
+              </div>
+              <div className="actions">
+                <button type="button" className="neutral" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("send_password_reset")}>{lifecycleBusy === "send_password_reset" ? "Sending..." : "Send Password Reset"}</button>
+                {editForm.active_status ? <button type="button" className="danger" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("deactivate")}>{lifecycleBusy === "deactivate" ? "Deactivating..." : "Deactivate Login"}</button> : <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("reactivate")}>{lifecycleBusy === "reactivate" ? "Reactivating..." : "Reactivate Login"}</button>}
+                <button type="button" className="danger" disabled={!deleteEligibility?.eligible || Boolean(lifecycleBusy)} onClick={() => void manageAccount("delete")}>{lifecycleBusy === "delete" ? "Deleting..." : "Delete Test Account"}</button>
+              </div>
+              <p className={deleteEligibility?.eligible ? "help eligibility-safe" : "help eligibility-warning"}>{deleteEligibility?.reason || "Checking whether protected historical records depend on this account..."}</p>
+            </section>
             <label>Role<select value={editForm.role} onChange={(e) => setEditRole(e.target.value)}>{staffRoles.map((role) => <option key={role} value={role}>{label(role)}</option>)}</select><span className="help">{roleHelp[editForm.role]}</span></label>
             <label className="inline"><input type="checkbox" checked={Boolean(editForm.active_status)} onChange={(e) => setEditForm({ ...editForm, active_status: e.target.checked })} /> Active login allowed</label>
             <fieldset className="wide">
@@ -298,12 +312,7 @@ export default function UserSettingsPage() {
               <div className="checkgrid">{entities.map((entity) => <label key={entity.id} className="inline"><input type="checkbox" checked={editForm.entityIds.includes(entity.id)} onChange={() => toggleEditEntity(entity.id)} /> {entity.short_code}</label>)}</div>
             </fieldset>
             <PermissionEditor permissions={editForm.permissions} setPermissions={(next) => setEditForm({ ...editForm, permissions: next })} />
-            <div className="actions wide"><button disabled={busy || Boolean(lifecycleBusy)}>{busy ? "Saving..." : "Save Staff Access"}</button><button type="button" className="neutral" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("send_password_reset")}>{lifecycleBusy === "send_password_reset" ? "Sending..." : "Send Password Reset"}</button>{editForm.active_status ? <button type="button" className="danger" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("deactivate")}>{lifecycleBusy === "deactivate" ? "Deactivating..." : "Deactivate Login"}</button> : <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={() => void manageAccount("reactivate")}>{lifecycleBusy === "reactivate" ? "Reactivating..." : "Reactivate Login"}</button>}</div>
-            <div className="wide lifecycle-box">
-              <strong>Delete test account</strong>
-              <p className="help">{deleteEligibility?.reason || "Checking for protected historical dependencies..."}</p>
-              <button type="button" className="danger" disabled={!deleteEligibility?.eligible || Boolean(lifecycleBusy)} onClick={() => void manageAccount("delete")}>{lifecycleBusy === "delete" ? "Deleting..." : "Delete Test Account"}</button>
-            </div>
+            <div className="actions wide"><button disabled={busy || Boolean(lifecycleBusy)}>{busy ? "Saving..." : "Save Staff Access"}</button></div>
           </form>
         )}
       </section></>}
@@ -328,7 +337,7 @@ function PermissionEditor({ permissions, setPermissions }: { permissions: Row; s
 
 function UserTable({ rows, access, entities, onEdit }: { rows: Row[]; access: Row[]; entities: Row[]; onEdit: (row: Row) => void }) {
   if (!rows.length) return <div className="empty">No users yet.</div>;
-  return <div className="record-list user-record-list"><div className="record-list-head"><span>User</span><span>Role</span><span>Entities</span><span>Status</span><span>Actions</span></div>{rows.map((row) => { const entityCodes = access.filter((item) => item.user_id === row.id && item.active_status).map((item) => entities.find((entity) => entity.id === item.entity_id)?.short_code).filter(Boolean); return <div className="record-row" key={row.id}><div className="record-row-main"><div className="record-primary"><strong>{row.display_name || "Display name not set"}</strong><span>{row.email}</span></div><div className="record-secondary">{label(row.role)}{row.role !== "owner" ? " · Trial access" : ""}</div><div className="entity-chips">{row.role === "owner" ? <span className="entity-chip">All</span> : entityCodes.length ? entityCodes.map((code) => <span className="entity-chip" key={code}>{code}</span>) : <span className="record-secondary">None</span>}</div><StatusBadge status={row.active_status ? "active" : "inactive"} /><ActionGroup><button className="primary" onClick={() => onEdit(row)}>Edit User</button></ActionGroup></div></div>; })}</div>;
+  return <div className="record-list user-record-list"><div className="record-list-head"><span>User</span><span>Role</span><span>Entities</span><span>Status</span><span>Actions</span></div>{rows.map((row) => { const entityCodes = access.filter((item) => item.user_id === row.id && item.active_status).map((item) => entities.find((entity) => entity.id === item.entity_id)?.short_code).filter(Boolean); return <div className="record-row" key={row.id}><div className="record-row-main"><div className="record-primary"><strong>{row.display_name || "Display name not set"}</strong><span>{row.email}</span></div><div className="record-secondary">{label(row.role)}{row.role !== "owner" ? " · Trial access" : ""}</div><div className="entity-chips">{row.role === "owner" ? <span className="entity-chip">All</span> : entityCodes.length ? entityCodes.map((code) => <span className="entity-chip" key={code}>{code}</span>) : <span className="record-secondary">None</span>}</div><StatusBadge status={row.active_status ? "active" : "inactive"} /><ActionGroup><button className="primary" onClick={() => onEdit(row)}>Edit / Account Actions</button></ActionGroup></div></div>; })}</div>;
 }
 
 function toggleId(ids: string[], id: string) {

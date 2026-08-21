@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { FormEvent, useEffect, useState } from "react";
 
 const neutralMessage = "If this email belongs to an active account, password reset instructions have been sent.";
 
 export default function ForgotPasswordPage() {
-  const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("Enter your login email to request official Supabase password-reset instructions.");
   const [busy, setBusy] = useState(false);
@@ -20,8 +18,10 @@ export default function ForgotPasswordPage() {
     event.preventDefault();
     setBusy(true);
     try {
-      await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
       });
     } finally {
       setMessage(neutralMessage);

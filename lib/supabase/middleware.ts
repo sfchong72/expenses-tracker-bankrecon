@@ -12,6 +12,7 @@ export async function updateSession(request: NextRequest) {
   const isLogin = pathname === "/login";
   const isForgotPassword = pathname === "/forgot-password";
   const isAuthCallback = pathname === "/auth/callback";
+  const isForgotPasswordApi = pathname === "/api/auth/forgot-password";
   const isAccessDenied = pathname === "/access-denied";
   const isApi = pathname.startsWith("/api/");
   const supabaseResponse = NextResponse.next({ request });
@@ -54,7 +55,7 @@ export async function updateSession(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      if (isLogin || isForgotPassword) return response;
+      if (isLogin || isForgotPassword || isForgotPasswordApi) return response;
       if (isApi) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
