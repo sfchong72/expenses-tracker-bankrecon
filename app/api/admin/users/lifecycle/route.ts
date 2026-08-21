@@ -106,7 +106,7 @@ export async function POST(request: Request) {
     if (banned.error) return NextResponse.json({ error: "The Auth login could not be deactivated." }, { status: 400 });
     const updated = await admin.from("app_profiles").update({ active_status: false }).eq("id", targetUserId);
     if (updated.error) {
-      await admin.auth.admin.updateUserById(targetUserId, { ban_duration: "none" });
+      await admin.auth.admin.updateUserById(targetUserId, { ban_duration: "0s" });
       return NextResponse.json({ error: "The application profile could not be deactivated." }, { status: 400 });
     }
     await writeAudit(admin, userData.user.id, "staff_login_deactivated", targetUserId, { email: target.email, role: target.role });
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "reactivate") {
-    const unbanned = await admin.auth.admin.updateUserById(targetUserId, { ban_duration: "none" });
+    const unbanned = await admin.auth.admin.updateUserById(targetUserId, { ban_duration: "0s" });
     if (unbanned.error) return NextResponse.json({ error: "The Auth login could not be reactivated." }, { status: 400 });
     const updated = await admin.from("app_profiles").update({ active_status: true }).eq("id", targetUserId);
     if (updated.error) {
@@ -171,4 +171,3 @@ async function writeAudit(admin: ReturnType<typeof createAdminClient>, actorUser
     payload,
   });
 }
-
