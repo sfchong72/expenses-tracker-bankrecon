@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { passwordResetRedirectUrl } from "@/lib/auth/password-reset-url";
 
 const neutralMessage = "If this email belongs to an active account, password reset instructions have been sent.";
 
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
   if (email && email.length <= 320) {
     try {
       const admin = createAdminClient();
-      const redirectTo = `${new URL(request.url).origin}/auth/callback?next=/reset-password`;
+      const redirectTo = passwordResetRedirectUrl(request);
       await admin.auth.resetPasswordForEmail(email, { redirectTo });
     } catch {
       // Keep the same neutral response for missing accounts, rate limits,
@@ -23,3 +24,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ message: neutralMessage });
 }
+
