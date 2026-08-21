@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { passwordResetRedirectUrl } from "@/lib/auth/password-reset-url";
 
 type LifecycleAction = "eligibility" | "send_password_reset" | "deactivate" | "reactivate" | "delete";
 
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
   if (action === "send_password_reset") {
     const email = authResult.data.user.email;
     if (!email) return NextResponse.json({ error: "The selected Auth user has no email address." }, { status: 400 });
-    const redirectTo = `${new URL(request.url).origin}/auth/callback?next=/reset-password`;
+    const redirectTo = passwordResetRedirectUrl(request);
     const reset = await admin.auth.resetPasswordForEmail(email, { redirectTo });
     if (reset.error) return NextResponse.json({ error: "Password reset instructions could not be sent. Check Supabase email and redirect settings." }, { status: 400 });
     await writeAudit(admin, userData.user.id, "staff_password_reset_sent", targetUserId, { email });
@@ -170,3 +171,4 @@ async function writeAudit(admin: ReturnType<typeof createAdminClient>, actorUser
     payload,
   });
 }
+
