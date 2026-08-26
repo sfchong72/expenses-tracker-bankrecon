@@ -37,5 +37,9 @@ export function resolveApplicationOrigin(request: Request) {
 }
 
 export function passwordResetRedirectUrl(request: Request) {
-  return new URL("/reset-password", resolveApplicationOrigin(request)).toString();
+  // The recovery email template appends a server-verifiable token hash to this
+  // callback. Keeping the token in the query string (instead of an implicit
+  // session in the URL fragment) lets it survive Vercel Preview Protection.
+  return new URL("/auth/callback", resolveApplicationOrigin(request)).toString();
 }
+
