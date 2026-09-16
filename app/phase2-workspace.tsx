@@ -234,7 +234,7 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
 
   async function downloadDoc(id: string) {
     const res = await fetch(`/api/documents/${id}/download`); const json = await res.json();
-    if (!res.ok) setError(json.error || "Download failed"); else window.open(json.signedUrl, "_blank", "noopener,noreferrer");
+    if (!res.ok) setError(json.error || "Download failed"); else window.open(json.url, "_blank", "noopener,noreferrer");
   }
 
   const missing = bills.filter((b) => ["no_document", "partial_evidence", "not_applicable"].includes(b.supporting_document_status));
