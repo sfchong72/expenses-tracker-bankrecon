@@ -2,7 +2,7 @@ import parser from "eslint-config-next/parser.js";
 
 export default [
   {
-    ignores: [".next/**", "node_modules/**", "next-env.d.ts"],
+    ignores: [".next/**", ".local-tools/**", "node_modules/**", "next-env.d.ts"],
   },
   {
     files: ["**/*.{js,jsx,ts,tsx}"],

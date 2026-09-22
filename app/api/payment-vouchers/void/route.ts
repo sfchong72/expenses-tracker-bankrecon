@@ -26,14 +26,5 @@ export async function POST(request: Request) {
   }).eq("id", voucherId).neq("status", "draft");
   if (updated.error) return NextResponse.json({ error: updated.error.message }, { status: 400 });
 
-  await db.from("audit_logs").insert({
-    actor_user_id: userData.user.id,
-    action: "payment_voucher_cancelled",
-    entity_type: "payment_voucher",
-    entity_id: voucherId,
-    payload: { ...voucher.data, cancellation_reason: cancellationReason },
-    data_origin: "manual",
-  });
-
   return NextResponse.json({ cancelled: true, status: "cancelled" });
 }

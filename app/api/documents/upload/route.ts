@@ -28,10 +28,20 @@ export async function POST(request: Request) {
   if (!validRecordTypes.has(linkedRecordType) || !validDocumentTypes.has(documentType)) return NextResponse.json({ error: "Unsupported document link or type" }, { status: 400 });
   if (!allowedTypes.has(file.type)) return NextResponse.json({ error: "Only PDF, JPG, JPEG and PNG files are allowed" }, { status: 400 });
   if (file.size > maxSize) return NextResponse.json({ error: "Maximum file size is 10 MB" }, { status: 400 });
-  const tableName = linkedRecordType === "supplier_bill" ? "supplier_bills" : linkedRecordType === "payment_voucher" ? "payment_vouchers" : linkedRecordType === "bill_payment" ? "bill_payments" : linkedRecordType === "recurring_obligation" ? "recurring_obligations" : linkedRecordType === "claim" ? "claims" : linkedRecordType === "claim_line" ? "claim_lines" : linkedRecordType === "claim_reimbursement" ? "claim_reimbursements" : "bank_transactions";
-  const linked = await supabase.from(tableName).select("id, entity_id").eq("id", linkedRecordId).maybeSingle();
-  if (linked.error || !linked.data) return NextResponse.json({ error: "The selected linked record no longer exists." }, { status: 400 });
-  if (linked.data.entity_id && linked.data.entity_id !== entityId) return NextResponse.json({ error: "The selected record does not belong to the selected entity." }, { status: 400 });
+  let linkedEntityId = "";
+  if (linkedRecordType === "claim_line") {
+    const line = await supabase.from("claim_lines").select("id, claim_id").eq("id", linkedRecordId).maybeSingle();
+    if (line.error || !line.data) return NextResponse.json({ error: "The selected linked record no longer exists." }, { status: 400 });
+    const claim = await supabase.from("claims").select("entity_id").eq("id", line.data.claim_id).maybeSingle();
+    if (claim.error || !claim.data) return NextResponse.json({ error: "The selected claim is not accessible." }, { status: 400 });
+    linkedEntityId = claim.data.entity_id;
+  } else {
+    const tableName = linkedRecordType === "supplier_bill" ? "supplier_bills" : linkedRecordType === "payment_voucher" ? "payment_vouchers" : linkedRecordType === "bill_payment" ? "bill_payments" : linkedRecordType === "recurring_obligation" ? "recurring_obligations" : linkedRecordType === "claim" ? "claims" : linkedRecordType === "claim_reimbursement" ? "claim_reimbursements" : "bank_transactions";
+    const linked = await supabase.from(tableName).select("id, entity_id").eq("id", linkedRecordId).maybeSingle();
+    if (linked.error || !linked.data) return NextResponse.json({ error: "The selected linked record no longer exists." }, { status: 400 });
+    linkedEntityId = linked.data.entity_id;
+  }
+  if (linkedEntityId !== entityId) return NextResponse.json({ error: "The selected record does not belong to the selected entity." }, { status: 400 });
   const bytes = Buffer.from(await file.arrayBuffer());
   const hash = createHash("sha256").update(bytes).digest("hex");
   const duplicate = await supabase.from("documents").select("id").eq("file_hash", hash).is("deleted_at", null).limit(1);
@@ -48,7 +58,17 @@ export async function POST(request: Request) {
   const inserted = await supabase.from("documents").insert({ entity_id: entityId, document_type: documentType, original_filename: cleanName(file.name), storage_path: storagePath, mime_type: file.type, file_size: file.size, file_hash: hash, uploaded_by: userData.user.id, version_number: version, replaces_document_id: replacesDocumentId || null, is_demo: false, data_origin: "manual" }).select("id").single();
   if (inserted.error) { await supabase.storage.from("bill-documents").remove([storagePath]); return NextResponse.json({ error: inserted.error.message }, { status: 400 }); }
   const link = await supabase.from("document_links").insert({ document_id: inserted.data.id, entity_id: entityId, linked_record_type: linkedRecordType, linked_record_id: linkedRecordId, created_by: userData.user.id, is_demo: false, data_origin: "manual" });
-  if (link.error) return NextResponse.json({ error: link.error.message }, { status: 400 });
+  if (link.error) {
+    const removed = await supabase.storage.from("bill-documents").remove([storagePath]);
+    if (!removed.error) {
+      const discarded = await supabase.rpc("discard_unlinked_document", { p_document_id: inserted.data.id });
+      if (discarded.error) {
+        await supabase.storage.from("bill-documents").upload(storagePath, bytes, { contentType: file.type, upsert: false });
+        return NextResponse.json({ error: `Document link failed and compensation needs review: ${link.error.message}` }, { status: 500 });
+      }
+    }
+    return NextResponse.json({ error: link.error.message }, { status: 400 });
+  }
   if (replacesDocumentId) await supabase.from("documents").update({ status: "replaced", is_archived: true, archived_at: new Date().toISOString(), archived_by: userData.user.id }).eq("id", replacesDocumentId);
   await supabase.from("audit_logs").insert({ actor_user_id: userData.user.id, action: replacesDocumentId ? "document_replaced" : "document_uploaded", entity_type: "document", entity_id: entityId, payload: { document_id: inserted.data.id, linked_record_type: linkedRecordType, linked_record_id: linkedRecordId, duplicate_hash: Boolean(duplicate.data?.length) } });
   return NextResponse.json({ id: inserted.data.id, duplicate_warning: Boolean(duplicate.data?.length) });

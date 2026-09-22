@@ -7,12 +7,12 @@ import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, any>;
 
-const staffRoles = ["finance_manager", "finance_staff", "data_entry", "read_only"];
+const staffRoles = ["finance_manager", "finance_staff", "management", "data_entry"];
 const roleHelp: Record<string, string> = {
-  finance_manager: "Manage documents, recurring bills and voucher preparation. Bank balances still hidden.",
-  finance_staff: "Create and update daily finance records, upload documents, no bank balances.",
-  data_entry: "Enter records and upload documents, no management settings.",
-  read_only: "View permitted records and documents only.",
+  finance_manager: "Full Finance operations, approvals, voids and eligible deletions. MFA required; bank balances remain hidden.",
+  finance_staff: "Create and edit Finance drafts and documents; no approval, issue, void or permanent deletion.",
+  management: "Read Finance reporting; approval only when the specific permission is appointed.",
+  data_entry: "Separate personal intern/data-entry account for student corrections and permitted drafts only.",
 };
 
 const defaultPermissions = {
@@ -22,6 +22,19 @@ const defaultPermissions = {
   can_view_bank_balances: false,
   can_manage_recurring_bills: false,
   can_generate_payment_vouchers: false,
+  can_view_finance: true,
+  can_manage_bills: false,
+  can_prepare_vouchers: false,
+  can_issue_vouchers: false,
+  can_void_vouchers: false,
+  can_delete_drafts: false,
+  can_delete_documents: false,
+  can_view_sensitive_payments: false,
+  can_view_confidential_claims: false,
+  can_manage_claims: false,
+  can_review_claims: false,
+  can_check_claims: false,
+  can_approve_claims: false,
 };
 
 export default function UserSettingsPage() {
@@ -73,13 +86,30 @@ export default function UserSettingsPage() {
   }
 
   function roleDefaults(role: string) {
+    const manager = role === "finance_manager";
+    const staff = role === "finance_staff";
+    const management = role === "management";
+    const dataEntry = role === "data_entry";
     return {
       can_view_documents: true,
-      can_upload_documents: role !== "read_only",
-      can_manage_documents: role === "finance_manager",
+      can_upload_documents: manager || staff || dataEntry,
+      can_manage_documents: manager || staff,
       can_view_bank_balances: false,
-      can_manage_recurring_bills: role === "finance_manager",
-      can_generate_payment_vouchers: role === "finance_manager",
+      can_manage_recurring_bills: manager,
+      can_generate_payment_vouchers: manager || staff,
+      can_view_finance: true,
+      can_manage_bills: manager || staff || dataEntry,
+      can_prepare_vouchers: manager || staff,
+      can_issue_vouchers: manager,
+      can_void_vouchers: manager,
+      can_delete_drafts: manager,
+      can_delete_documents: manager,
+      can_view_sensitive_payments: manager || staff,
+      can_view_confidential_claims: manager,
+      can_manage_claims: manager || staff || dataEntry,
+      can_review_claims: manager || staff || management,
+      can_check_claims: manager || staff,
+      can_approve_claims: manager,
     };
   }
 
@@ -266,6 +296,19 @@ function PermissionEditor({ permissions, setPermissions }: { permissions: Row; s
     ["can_manage_documents", "Archive / manage documents"],
     ["can_manage_recurring_bills", "Manage recurring bills"],
     ["can_generate_payment_vouchers", "Prepare payment vouchers"],
+    ["can_view_finance", "View Finance operations"],
+    ["can_manage_bills", "Create and edit permitted bills"],
+    ["can_prepare_vouchers", "Prepare voucher drafts"],
+    ["can_issue_vouchers", "Issue / finalise vouchers"],
+    ["can_void_vouchers", "Void / cancel vouchers"],
+    ["can_delete_drafts", "Permanently delete eligible drafts"],
+    ["can_delete_documents", "Permanently delete incorrect documents"],
+    ["can_view_sensitive_payments", "View sensitive payment information"],
+    ["can_view_confidential_claims", "View confidential management/director claims"],
+    ["can_manage_claims", "Create and edit claim drafts"],
+    ["can_review_claims", "Review claims"],
+    ["can_check_claims", "Check claims"],
+    ["can_approve_claims", "Approve claims"],
     ["can_view_bank_balances", "View bank balances"],
   ];
   return <fieldset className="wide">

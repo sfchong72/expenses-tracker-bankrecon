@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-const deletableStatuses = new Set(["draft", "incomplete"]);
-
 export async function POST(request: Request) {
   const db = await createClient();
   const { data: userData } = await db.auth.getUser();
@@ -12,39 +10,30 @@ export async function POST(request: Request) {
   const note = String(reason || "").trim();
   if (!studentId) return NextResponse.json({ error: "Choose a student record first." }, { status: 400 });
   if (!["delete", "archive", "duplicate"].includes(action)) return NextResponse.json({ error: "Choose delete, archive or mark as duplicate." }, { status: 400 });
-  if (action !== "delete" && !note) return NextResponse.json({ error: "Enter a reason for the audit trail." }, { status: 400 });
+  if (!note) return NextResponse.json({ error: "Enter a reason for the audit trail." }, { status: 400 });
 
   const studentRes = await db.from("students").select("id, student_number, full_name, lifecycle_status, remarks").eq("id", studentId).maybeSingle();
   if (studentRes.error) return NextResponse.json({ error: studentRes.error.message }, { status: 400 });
   if (!studentRes.data) return NextResponse.json({ error: "Student not found." }, { status: 404 });
 
-  const [enrolments, documents, legacy, audits] = await Promise.all([
+  const [enrolments, documents, legacy] = await Promise.all([
     db.from("enrolments").select("id", { count: "exact", head: true }).eq("student_id", studentId),
     db.from("document_links").select("id", { count: "exact", head: true }).eq("linked_record_type", "student").eq("linked_record_id", studentId),
     db.from("student_legacy_records").select("id", { count: "exact", head: true }).eq("student_id", studentId),
-    db.from("audit_logs").select("id", { count: "exact", head: true }).eq("entity_type", "student").eq("entity_id", studentId),
   ]);
-  const dependencyError = enrolments.error || documents.error || legacy.error || audits.error;
+  const dependencyError = enrolments.error || documents.error || legacy.error;
   if (dependencyError) return NextResponse.json({ error: dependencyError.message }, { status: 400 });
 
-  const dependencyCount = (enrolments.count || 0) + (documents.count || 0) + (legacy.count || 0) + (audits.count || 0);
+  const dependencyCount = (enrolments.count || 0) + (documents.count || 0) + (legacy.count || 0);
   if (action === "delete") {
-    if (!deletableStatuses.has(studentRes.data.lifecycle_status) || dependencyCount > 0) {
+    if (dependencyCount > 0) {
       return NextResponse.json({
-        error: "This student has linked records or is no longer a simple draft. Archive or mark as duplicate instead.",
+        error: "This student has linked records. Use the controlled merge workflow instead.",
         dependency_count: dependencyCount,
       }, { status: 400 });
     }
-    const deleted = await db.from("students").delete().eq("id", studentId).in("lifecycle_status", [...deletableStatuses]);
+    const deleted = await db.rpc("delete_duplicate_student", { p_student_id: studentId, p_reason: note });
     if (deleted.error) return NextResponse.json({ error: deleted.error.message }, { status: 400 });
-    await db.from("audit_logs").insert({
-      actor_user_id: userData.user.id,
-      action: "student_draft_deleted",
-      entity_type: "student",
-      entity_id: studentId,
-      payload: { student_number: studentRes.data.student_number, full_name: studentRes.data.full_name },
-      data_origin: "manual",
-    });
     return NextResponse.json({ status: "deleted" });
   }
 

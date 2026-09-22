@@ -3,6 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
+function safeNext(value: string | null) {
+  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
+
 export default function LoginPage() {
   const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
@@ -16,6 +20,8 @@ export default function LoginPage() {
     const reason = params.get("error");
     if (reason === "no_profile") setError("Access denied: no application profile exists for this login.");
     if (reason === "inactive") setError("Access denied: this user account is inactive.");
+    if (reason === "mfa_required") setError("Multi-factor authentication is required for Owner and Finance Manager accounts. Complete the enrolled MFA challenge before continuing.");
+    if (reason === "auth_check_failed") setError("The authorization check is temporarily unavailable. Access remains closed; please try again.");
   }, []);
 
   async function signIn(e: FormEvent) {
@@ -48,9 +54,21 @@ export default function LoginPage() {
     } else if (!profile.active_status) {
       await supabase.auth.signOut();
       setError("Access denied: this user account is inactive.");
+    } else if (!["owner", "finance_manager", "finance_staff", "management", "data_entry"].includes(profile.role)) {
+      await supabase.auth.signOut();
+      setError("Access denied: this private Finance and Management application is not assigned to your role.");
+    } else if (["owner", "finance_manager"].includes(profile.role)) {
+      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (assurance?.currentLevel !== "aal2") {
+        const params = new URLSearchParams(window.location.search);
+        window.location.href = `/mfa?next=${encodeURIComponent(safeNext(params.get("next")))}`;
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      window.location.href = safeNext(params.get("next"));
     } else {
       const params = new URLSearchParams(window.location.search);
-      window.location.href = params.get("next") || "/";
+      window.location.href = safeNext(params.get("next"));
     }
     setBusy(false);
   }

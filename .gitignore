@@ -1,5 +1,10 @@
 node_modules/
 .pnpm-store/
+.local-tools/
+.parser-tools*/
+.docker-config/
+validation-evidence/
+supabase/.temp/
 .next/
 /out/
 /build

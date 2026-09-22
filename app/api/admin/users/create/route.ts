@@ -2,7 +2,7 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-const staffRoles = new Set(["finance_manager", "finance_staff", "data_entry", "read_only"]);
+const staffRoles = new Set(["finance_manager", "finance_staff", "management", "data_entry"]);
 const genericCreateError = "Could not create the staff login. Check the email address and try again.";
 
 type PermissionPayload = {
@@ -12,6 +12,19 @@ type PermissionPayload = {
   can_view_bank_balances?: boolean;
   can_manage_recurring_bills?: boolean;
   can_generate_payment_vouchers?: boolean;
+  can_view_finance?: boolean;
+  can_manage_bills?: boolean;
+  can_prepare_vouchers?: boolean;
+  can_issue_vouchers?: boolean;
+  can_void_vouchers?: boolean;
+  can_delete_drafts?: boolean;
+  can_delete_documents?: boolean;
+  can_view_sensitive_payments?: boolean;
+  can_view_confidential_claims?: boolean;
+  can_manage_claims?: boolean;
+  can_review_claims?: boolean;
+  can_check_claims?: boolean;
+  can_approve_claims?: boolean;
 };
 
 export const runtime = "nodejs";
@@ -101,7 +114,20 @@ export async function POST(request: Request) {
     can_manage_documents: permissions.can_manage_documents ?? role === "finance_manager",
     can_view_bank_balances: false,
     can_manage_recurring_bills: permissions.can_manage_recurring_bills ?? role === "finance_manager",
-    can_generate_payment_vouchers: permissions.can_generate_payment_vouchers ?? role === "finance_manager",
+    can_generate_payment_vouchers: permissions.can_generate_payment_vouchers ?? ["finance_manager", "finance_staff"].includes(role),
+    can_view_finance: permissions.can_view_finance ?? true,
+    can_manage_bills: permissions.can_manage_bills ?? ["finance_manager", "finance_staff", "data_entry"].includes(role),
+    can_prepare_vouchers: permissions.can_prepare_vouchers ?? ["finance_manager", "finance_staff"].includes(role),
+    can_issue_vouchers: permissions.can_issue_vouchers ?? role === "finance_manager",
+    can_void_vouchers: permissions.can_void_vouchers ?? role === "finance_manager",
+    can_delete_drafts: permissions.can_delete_drafts ?? role === "finance_manager",
+    can_delete_documents: permissions.can_delete_documents ?? role === "finance_manager",
+    can_view_sensitive_payments: permissions.can_view_sensitive_payments ?? ["finance_manager", "finance_staff"].includes(role),
+    can_view_confidential_claims: permissions.can_view_confidential_claims ?? role === "finance_manager",
+    can_manage_claims: permissions.can_manage_claims ?? ["finance_manager", "finance_staff", "data_entry"].includes(role),
+    can_review_claims: permissions.can_review_claims ?? ["finance_manager", "finance_staff", "management"].includes(role),
+    can_check_claims: permissions.can_check_claims ?? ["finance_manager", "finance_staff"].includes(role),
+    can_approve_claims: permissions.can_approve_claims ?? role === "finance_manager",
   });
   if (permissionUpsert.error) return await rollbackCreatedUser(admin, staffUserId, "Could not save staff permissions.");
 

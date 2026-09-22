@@ -6,8 +6,25 @@
 - All AI calls and service-role operations go through Next.js `/api` server routes.
 
 ## Permission Model
-- **v1 (demo):** Permissive RLS — all rows readable and writable by any visitor. Suitable for internal preview only.
-- **Sprint 5 (lock-down):** Replace every v1 RLS policy with `auth.uid() = user_id`. Unauthenticated users get zero rows. Agent actions inherit the authenticated user's session — no elevated privileges.
+- **Owner/Admin:** full access, user administration and eligible reasoned deletion/merge; MFA required.
+- **Finance Manager:** full Finance operations, approval, cancellation, void and eligible reasoned deletion; MFA required.
+- **Finance Staff:** Finance draft/create/edit and voucher preparation; no self-approval, user administration or permanent deletion of finalized transactions.
+- **Management:** Finance reporting and only specifically appointed approval permissions; no routine editing by default.
+- **Intern/Data Entry:** separate personal login, assigned entity/branch scope, permitted drafts and Student Operations corrections only; no approval, issue, payment, cancellation, merge, permanent deletion, user administration, bank balances, sensitive payment data or confidential management/director claims.
+- **All other, anonymous and inactive users:** no application, API, database, document or Storage access.
+
+Owner/Admin and Finance Manager database access requires the Supabase JWT `aal2` claim. Browser
+navigation is never treated as authorization; grants, RLS, Storage policies, RPC checks and
+server-side route checks enforce the boundary.
+
+## Deletion And Finality
+
+- Empty duplicate students may be permanently deleted only by Owner/Admin or Finance Manager with a reason.
+- Linked duplicate students must use the controlled merge workflow before the source is deleted.
+- Incorrect files are removed from private Storage and metadata through a compensating server workflow.
+- Eligible draft/incomplete Finance records may be deleted only by Owner/Admin or Finance Manager with a reason.
+- Issued, approved, posted, paid or otherwise finalized Finance records are voided/cancelled, never hard-deleted.
+- Every deletion, merge, cancellation and void records actor, timestamp, reason and affected record in the audit log.
 
 ## Approved-Tools Rule
 No agent or background job may call ad-hoc SQL, arbitrary shell commands, or unscoped HTTP endpoints. Only the named tools in `AGENTIC_LAYER.md` are permitted. Any new tool requires a code-review entry in this document before use.

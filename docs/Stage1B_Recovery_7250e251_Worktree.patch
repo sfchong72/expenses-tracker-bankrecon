@@ -1,0 +1,362 @@
+diff --git a/docs/Phase1B_0020_Security_Test_Matrix.md b/docs/Phase1B_0020_Security_Test_Matrix.md
+index 4e757de..d3af272 100644
+--- a/docs/Phase1B_0020_Security_Test_Matrix.md
++++ b/docs/Phase1B_0020_Security_Test_Matrix.md
+@@ -1,12 +1,12 @@
+ # Phase 1B Migration 0020 — Security Test Matrix
+ 
+-**Status:** Draft test plan only  
+-**Target:** Disposable Supabase environment after a clean replay of migrations 0001–0020  
++**Status:** Automated; repaired authorization gaps passed the full disposable rerun
++**Target:** Disposable Supabase environment after a clean replay of migrations 0001–0018, followed by 0020 (0019 excluded)
+ **Production use:** Prohibited until baseline reconciliation and non-production approval
+ 
+ ## Test identities
+ 
+-Create disposable Auth users and matching Stage 1A access records in the test project only:
++The acceptance harness creates disposable Auth users and matching Stage 1A access records in the test project only:
+ 
+ | Identity | Required fixture |
+ |---|---|
+@@ -51,20 +51,41 @@ Create two matching student pairs in KL and one matching pair in PG. Use fiction
+ 7. Merge two disposable same-branch Draft students with a reason; verify event/audit creation, then roll back.
+ 8. Repeat all read/write attempts as inactive and anonymous identities and confirm denial.
+ 
+-## Automated catalog test
++## Automated suites
+ 
+ Run:
+ 
+-```text
+-supabase test db
++```powershell
++.\run-0020-disposable-test.ps1 -OutputDirectory C:\path\to\local-results
+ ```
+ 
+-The pgTAP file `supabase/tests/0020_stage1b_preflight_security_hardening.test.sql` checks view options, function execution, fixed search paths, minimum grants, operation-specific policies, protected columns and the private counter. Behavioural role tests above remain mandatory because catalog assertions alone cannot prove branch isolation.
++The harness deliberately rejects hosted/linked commands and executes only against
++its uniquely named local Docker project. It runs the following suites separately:
++
++| Suite | File | Assertions |
++|---|---|---:|
++| Catalogue/security shape | `supabase/tests/0020_stage1b_preflight_security_hardening.test.sql` | 34 |
++| Behavioural access | `supabase/tests/0020_stage1b_behavioural_security_matrix.sql` | 40 |
++| Stage 1A regression | `supabase/tests/0020_stage1a_regression.sql` | 16 |
++| Finance foundation regression | `supabase/tests/0020_finance_foundation_regression.sql` | 8 |
++
++Fictional identities and rollback-safe helper actions live in
++`supabase/tests/support/0020_stage1b_fixtures.sql`. The behavioural suite covers
++owner, KL and PG branch users, an authenticated user without access, an inactive
++user retaining stale access records, and anonymous access. It verifies actual
++SELECT/INSERT/UPDATE/DELETE/RPC behaviour rather than catalogue state alone.
++
++Harness reporting separates environment setup, baseline replay, migration 0020,
++database lint, catalogue pgTAP, behavioural matrix, Stage 1A regression, finance
++regression and cleanup. Exit codes are `0` for full success, `1` for a test-stage
++failure with successful cleanup, `2` for passed tests with cleanup failure, and
++`3` when both acceptance and cleanup fail. Run `-SelfTest` to verify this contract
++without starting Docker.
+ 
+ ## Exit criteria
+ 
+ - All pgTAP assertions pass.
+-- S01–S16 pass for every identity.
++- All 40 behavioural assertions pass for every identity and edge condition.
+ - Stage 1A Programme, Intake, Enrolment, duplicate review and Import workflows pass regression testing.
+ - No production data is used as a fixture.
+ - No unexplained schema difference remains between clean replay and production baseline.
+diff --git a/supabase/migrations/0020_stage1b_preflight_security_hardening.sql b/supabase/migrations/0020_stage1b_preflight_security_hardening.sql
+index 2c47278..ea418a1 100644
+--- a/supabase/migrations/0020_stage1b_preflight_security_hardening.sql
++++ b/supabase/migrations/0020_stage1b_preflight_security_hardening.sql
+@@ -29,12 +29,73 @@ begin
+      or to_regprocedure('public.get_student_sensitive_identity(uuid)') is null
+      or to_regprocedure('public.normalise_student_identity(text)') is null
+      or to_regprocedure('public.mask_student_identity(text)') is null
+-     or to_regprocedure('public.student_identity_fingerprint(text,text)') is null then
++     or to_regprocedure('public.student_identity_fingerprint(text,text)') is null
++     or to_regprocedure('app_private.current_user_is_active()') is null
++     or to_regprocedure('app_private.current_user_is_owner()') is null
++     or to_regprocedure('app_private.user_can_access_entity(uuid)') is null
++     or to_regprocedure('app_private.user_can_access_branch(uuid,uuid)') is null
++     or to_regprocedure('app_private.current_user_has_operations_permission(text)') is null
++     or to_regprocedure('app_private.current_user_can(text)') is null then
+     raise exception '0020 preflight failed: expected Stage 1A functions are missing';
+   end if;
+ end
+ $preflight$;
+ 
++-- Shared access helpers are dependencies of every Student RLS policy and RPC.
++-- Keep their name resolution caller-independent, and require an active profile
++-- before stale entity/branch access rows can confer access.
++alter function app_private.current_user_is_active()
++  set search_path = '';
++
++alter function app_private.current_user_is_owner()
++  set search_path = '';
++
++alter function app_private.user_can_access_entity(uuid)
++  set search_path = '';
++
++alter function app_private.current_user_has_operations_permission(text)
++  set search_path = '';
++
++alter function app_private.current_user_can(text)
++  set search_path = '';
++
++create or replace function app_private.user_can_access_branch(
++  target_entity_id uuid,
++  target_branch_id uuid
++)
++returns boolean
++language sql
++security definer
++set search_path = ''
++as $$
++  select app_private.current_user_is_active()
++    and (
++      app_private.current_user_is_owner()
++      or exists (
++        select 1
++        from public.user_branch_access uba
++        where uba.user_id = auth.uid()
++          and uba.entity_id = target_entity_id
++          and (target_branch_id is null or uba.branch_id = target_branch_id)
++          and uba.active_status = true
++      )
++      or exists (
++        select 1
++        from public.user_entity_access uea
++        where uea.user_id = auth.uid()
++          and uea.entity_id = target_entity_id
++          and uea.active_status = true
++          and (
++            target_branch_id is null
++            or uea.role in ('owner', 'finance_manager', 'finance_staff')
++          )
++      )
++    );
++$$;
++
++revoke all on function app_private.user_can_access_branch(uuid, uuid) from public, anon;
++grant execute on function app_private.user_can_access_branch(uuid, uuid) to authenticated, service_role;
++
+ -- Keep identity helpers deterministic and prevent caller-controlled name
+ -- resolution. Authenticated execution remains required by the existing
+ -- security-invoker student trigger; anonymous execution is not required.
+@@ -150,7 +211,10 @@ as $$
+       and app_private.current_user_can('can_manage_students')
+       and (
+         app_private.current_user_is_owner()
+-        or app_private.user_can_access_branch(s.entity_id, s.home_branch_id)
++        or (
++          s.home_branch_id is not null
++          and app_private.user_can_access_branch(s.entity_id, s.home_branch_id)
++        )
+         or exists (
+           select 1
+           from public.enrolments en
+@@ -239,8 +303,13 @@ begin
+     raise exception 'Students from different entities cannot be merged';
+   end if;
+ 
+-  if not app_private.user_can_access_branch(source_entity_id, source_branch_id)
+-     or not app_private.user_can_access_branch(target_entity_id, target_branch_id) then
++  if not app_private.current_user_is_owner()
++     and (
++       source_branch_id is null
++       or target_branch_id is null
++       or not app_private.user_can_access_branch(source_entity_id, source_branch_id)
++       or not app_private.user_can_access_branch(target_entity_id, target_branch_id)
++     ) then
+     raise exception 'Not authorised to merge one or both student records';
+   end if;
+ 
+@@ -329,7 +398,10 @@ as $$
+     and app_private.current_user_can('can_view_student_pii')
+     and (
+       app_private.current_user_is_owner()
+-      or app_private.user_can_access_branch(s.entity_id, s.home_branch_id)
++      or (
++        s.home_branch_id is not null
++        and app_private.user_can_access_branch(s.entity_id, s.home_branch_id)
++      )
+       or exists (
+         select 1
+         from public.enrolments e
+@@ -406,7 +478,10 @@ as $$
+     and app_private.current_user_can('can_manage_students')
+     and (
+       app_private.current_user_is_owner()
+-      or app_private.user_can_access_branch(s1.entity_id, s1.home_branch_id)
++      or (
++        s1.home_branch_id is not null
++        and app_private.user_can_access_branch(s1.entity_id, s1.home_branch_id)
++      )
+       or exists (
+         select 1 from public.enrolments en
+         where en.student_id = s1.id
+@@ -418,7 +493,10 @@ as $$
+     )
+     and (
+       app_private.current_user_is_owner()
+-      or app_private.user_can_access_branch(s2.entity_id, s2.home_branch_id)
++      or (
++        s2.home_branch_id is not null
++        and app_private.user_can_access_branch(s2.entity_id, s2.home_branch_id)
++      )
+       or exists (
+         select 1 from public.enrolments en
+         where en.student_id = s2.id
+@@ -456,6 +534,63 @@ grant select on public.student_duplicate_warning_view to authenticated, service_
+ -- Replace broad FOR ALL policies with operation-specific policies. Existing
+ -- predicates are retained, while DELETE is available only for import preview
+ -- rows because the current import parser clears and replaces those rows.
++drop policy if exists "students_scoped_select" on public.students;
++create policy "students_scoped_select" on public.students
++for select to authenticated
++using (
++  app_private.current_user_is_active()
++  and (
++    app_private.current_user_is_owner()
++    or (
++      home_branch_id is not null
++      and app_private.user_can_access_branch(entity_id, home_branch_id)
++    )
++    or exists (
++      select 1
++      from public.enrolments en
++      where en.student_id = students.id
++        and (
++          app_private.user_can_access_branch(en.entity_id, en.branch_id)
++          or en.counsellor_user_id = auth.uid()
++        )
++    )
++  )
++);
++
++drop policy if exists "students_manage_insert" on public.students;
++create policy "students_manage_insert" on public.students
++for insert to authenticated
++with check (
++  app_private.current_user_can('can_manage_students')
++  and home_branch_id is not null
++  and app_private.user_can_access_branch(entity_id, home_branch_id)
++);
++
++drop policy if exists "students_manage_update" on public.students;
++create policy "students_manage_update" on public.students
++for update to authenticated
++using (
++  app_private.current_user_can('can_manage_students')
++  and (
++    app_private.current_user_is_owner()
++    or (
++      home_branch_id is not null
++      and app_private.user_can_access_branch(entity_id, home_branch_id)
++    )
++    or exists (
++      select 1
++      from public.enrolments en
++      where en.student_id = students.id
++        and app_private.user_can_access_branch(en.entity_id, en.branch_id)
++    )
++  )
++)
++with check (
++  app_private.current_user_can('can_manage_students')
++  and home_branch_id is not null
++  and app_private.user_can_access_branch(entity_id, home_branch_id)
++);
++
+ drop policy if exists "programmes_manage" on public.programmes;
+ create policy "programmes_insert" on public.programmes
+ for insert to authenticated
+@@ -510,6 +645,33 @@ with check (
+   and app_private.user_can_access_branch(entity_id, branch_id)
+ );
+ 
++drop policy if exists "enrolments_scoped_select" on public.enrolments;
++create policy "enrolments_scoped_select" on public.enrolments
++for select to authenticated
++using (
++  app_private.current_user_is_active()
++  and (
++    app_private.user_can_access_branch(entity_id, branch_id)
++    or counsellor_user_id = auth.uid()
++  )
++);
++
++drop policy if exists "enrolment_counsellor_history_select" on public.enrolment_counsellor_history;
++create policy "enrolment_counsellor_history_select" on public.enrolment_counsellor_history
++for select to authenticated
++using (
++  app_private.current_user_is_active()
++  and exists (
++    select 1
++    from public.enrolments en
++    where en.id = enrolment_id
++      and (
++        app_private.user_can_access_branch(en.entity_id, en.branch_id)
++        or en.counsellor_user_id = auth.uid()
++      )
++  )
++);
++
+ drop policy if exists "student_import_batches_manage" on public.student_import_batches;
+ create policy "student_import_batches_insert" on public.student_import_batches
+ for insert to authenticated
+diff --git a/supabase/tests/0020_stage1b_preflight_security_hardening.test.sql b/supabase/tests/0020_stage1b_preflight_security_hardening.test.sql
+index 3b1d861..3c9611f 100644
+--- a/supabase/tests/0020_stage1b_preflight_security_hardening.test.sql
++++ b/supabase/tests/0020_stage1b_preflight_security_hardening.test.sql
+@@ -108,7 +108,15 @@ select extensions.ok(
+              'merge_students',
+              'get_student_sensitive_identity'
+            ))
+-           or (n.nspname = 'app_private' and p.proname = 'student_duplicate_warning_rows'))
++           or (n.nspname = 'app_private' and p.proname in (
++             'student_duplicate_warning_rows',
++             'current_user_is_active',
++             'current_user_is_owner',
++             'user_can_access_entity',
++             'user_can_access_branch',
++             'current_user_has_operations_permission',
++             'current_user_can'
++           )))
+       and (p.proconfig is null
+            or exists (
+              select 1 from unnest(p.proconfig) setting
+@@ -270,6 +278,7 @@ select extensions.is(
+    from pg_policies
+    where schemaname = 'public'
+      and policyname in (
++       'students_manage_insert', 'students_manage_update',
+        'programmes_insert', 'programmes_update',
+        'programme_intakes_insert', 'programme_intakes_update',
+        'enrolments_insert', 'enrolments_update',
+@@ -277,7 +286,7 @@ select extensions.is(
+        'student_import_rows_insert', 'student_import_rows_update',
+        'student_import_rows_delete'
+      )),
+-  11,
++  13,
+   'operation-specific write policies exist'
+ );
+ 
+@@ -286,11 +295,13 @@ select extensions.is(
+    from pg_policies
+    where schemaname = 'public'
+      and policyname in (
++       'students_scoped_select',
+        'programmes_scoped_select', 'programme_intakes_scoped_select',
+        'enrolments_scoped_select', 'student_import_batches_select',
+-       'student_import_rows_select', 'student_legacy_records_select'
++       'student_import_rows_select', 'student_legacy_records_select',
++       'enrolment_counsellor_history_select'
+      )),
+-  6,
++  8,
+   'existing scoped SELECT policies remain present'
+ );
+ 
