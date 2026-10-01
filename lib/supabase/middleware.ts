@@ -11,6 +11,51 @@ function safeInternalPath(value: string | null) {
   return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
 }
 
+const applicationRoles = new Set([
+  "owner",
+  "finance_manager",
+  "finance_staff",
+  "management",
+  "data_entry",
+  "read_only",
+  "branch_manager",
+  "counsellor",
+  "marketing",
+  "student_services",
+  "trainer",
+]);
+
+const highRiskExactPaths = new Set([
+  "/api/bank-imports/confirm",
+  "/api/bank-imports/export",
+  "/api/bank-reports/monthly",
+  "/api/claims/export",
+  "/api/claims/prepare-voucher",
+  "/api/claims/status",
+  "/api/payment-vouchers/delete",
+  "/api/payment-vouchers/generate",
+  "/api/payment-vouchers/issue",
+  "/api/payment-vouchers/void",
+  "/api/reconciliation/confirm-match",
+  "/api/reconciliation/unmatch",
+]);
+
+function requiresAal2(pathname: string) {
+  return highRiskExactPaths.has(pathname)
+    || pathname.startsWith("/api/admin/")
+    || pathname.startsWith("/api/bank-imports/")
+    || pathname.startsWith("/api/bank-reports/")
+    || pathname.startsWith("/api/reconciliation/")
+    || /^\/api\/documents\/[^/]+\/delete$/.test(pathname)
+    || pathname === "/bank-transactions"
+    || pathname.startsWith("/bank-imports")
+    || pathname.startsWith("/payment-vouchers")
+    || pathname.startsWith("/reconcile")
+    || pathname.startsWith("/reports/bank-reconciliation")
+    || pathname === "/settings/users"
+    || pathname.startsWith("/settings/users/");
+}
+
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isLogin = pathname === "/login";
@@ -95,8 +140,7 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    const allowedRoles = new Set(["owner", "finance_manager", "finance_staff", "management", "data_entry"]);
-    if (!allowedRoles.has(profile.role)) {
+    if (!applicationRoles.has(profile.role)) {
       if (isApi) return NextResponse.json({ error: "Application access is not assigned" }, { status: 403 });
       if (isAccessDenied) return response;
       const redirectUrl = request.nextUrl.clone();
@@ -105,28 +149,31 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    if (["owner", "finance_manager"].includes(profile.role)) {
+    if (isMfa) {
+      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (assurance?.currentLevel !== "aal2") return response;
+
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = safeInternalPath(request.nextUrl.searchParams.get("next"));
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (requiresAal2(pathname)) {
       const { data: assurance, error: assuranceError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (assuranceError || assurance?.currentLevel !== "aal2") {
         if (isMfa) return response;
-        if (isApi) return NextResponse.json({ error: "MFA assurance level 2 is required" }, { status: 403 });
+        if (isApi) {
+          return NextResponse.json(
+            { error: "MFA assurance level 2 is required", code: "MFA_REQUIRED" },
+            { status: 403 },
+          );
+        }
         const redirectUrl = request.nextUrl.clone();
         redirectUrl.pathname = "/mfa";
         redirectUrl.searchParams.set("next", pathname === "/login" ? "/" : pathname);
         return NextResponse.redirect(redirectUrl);
       }
-    } else if (isMfa) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/";
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
-    }
-
-    if (isMfa) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = safeInternalPath(request.nextUrl.searchParams.get("next"));
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
     }
 
     if (isLogin) {

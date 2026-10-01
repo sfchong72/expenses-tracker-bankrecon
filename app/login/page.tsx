@@ -20,7 +20,7 @@ export default function LoginPage() {
     const reason = params.get("error");
     if (reason === "no_profile") setError("Access denied: no application profile exists for this login.");
     if (reason === "inactive") setError("Access denied: this user account is inactive.");
-    if (reason === "mfa_required") setError("Multi-factor authentication is required for Owner and Finance Manager accounts. Complete the enrolled MFA challenge before continuing.");
+    if (reason === "mfa_required") setError("Multi-factor authentication is required for this high-risk action. Complete the enrolled MFA challenge before continuing.");
     if (reason === "auth_check_failed") setError("The authorization check is temporarily unavailable. Access remains closed; please try again.");
   }, []);
 
@@ -54,18 +54,9 @@ export default function LoginPage() {
     } else if (!profile.active_status) {
       await supabase.auth.signOut();
       setError("Access denied: this user account is inactive.");
-    } else if (!["owner", "finance_manager", "finance_staff", "management", "data_entry"].includes(profile.role)) {
+    } else if (!["owner", "finance_manager", "finance_staff", "management", "data_entry", "read_only", "branch_manager", "counsellor", "marketing", "student_services", "trainer"].includes(profile.role)) {
       await supabase.auth.signOut();
-      setError("Access denied: this private Finance and Management application is not assigned to your role.");
-    } else if (["owner", "finance_manager"].includes(profile.role)) {
-      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      if (assurance?.currentLevel !== "aal2") {
-        const params = new URLSearchParams(window.location.search);
-        window.location.href = `/mfa?next=${encodeURIComponent(safeNext(params.get("next")))}`;
-        return;
-      }
-      const params = new URLSearchParams(window.location.search);
-      window.location.href = safeNext(params.get("next"));
+      setError("Access denied: this application is not assigned to your role.");
     } else {
       const params = new URLSearchParams(window.location.search);
       window.location.href = safeNext(params.get("next"));
@@ -98,7 +89,7 @@ export default function LoginPage() {
 
         <div className="panel">
           <h2>Access</h2>
-          <p>Only active finance users with an application profile can access the dashboard.</p>
+          <p>Only active users with an assigned application profile can access the dashboard.</p>
           <p>Owner users can maintain settings and view all entities. Staff access is controlled by profile and entity assignment.</p>
         </div>
       </section>

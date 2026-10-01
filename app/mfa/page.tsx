@@ -114,7 +114,7 @@ export default function MfaPage() {
       </header>
 
       <section className={error ? "notice error" : "notice"}>
-        <p>{error || "Owner and Finance Manager accounts must verify a second factor before the application opens."}</p>
+        <p>{error || "Verify a second factor to continue with this high-risk action."}</p>
       </section>
 
       <section className="grid">
@@ -159,6 +159,7 @@ export default function MfaPage() {
         <div className="panel">
           <h2>Account safety</h2>
           <p>Do not share the owner account or its authenticator. Every user must use a separate personal login.</p>
+          <p>If the enrolled factor is unavailable, stop and ask the account administrator to use the approved recovery process. Do not bypass the MFA requirement.</p>
           <button type="button" onClick={signOut}>Cancel and sign out</button>
         </div>
       </section>

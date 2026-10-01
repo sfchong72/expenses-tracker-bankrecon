@@ -1,13 +1,18 @@
 -- Disposable/local database only. Exercises the private Finance/Management
--- boundary and atomic Finance workflows added to authoritative migration 0021.
+-- boundary, owner-approved MFA scope, and soft-merge behavior added by 0022.
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(49);
+select extensions.plan(70);
 
 select extensions.ok(
   to_regprocedure('app_private.current_user_has_app_access()') is not null,
   'private application-access helper exists'
+);
+select extensions.ok(
+  to_regprocedure('app_private.current_user_has_aal2()') is not null
+  and to_regprocedure('app_private.current_user_can_high_risk(text)') is not null,
+  'explicit AAL2 and high-risk authorization helpers exist'
 );
 select extensions.ok(
   to_regprocedure('app_private.user_can_access_document(uuid)') is not null,
@@ -21,20 +26,23 @@ select extensions.ok(
 );
 select extensions.ok(
   to_regprocedure('public.delete_document_metadata(uuid,text)') is not null
-  and to_regprocedure('public.delete_duplicate_student(uuid,text)') is not null,
-  'controlled deletion RPCs exist'
+  and to_regprocedure('public.delete_payment_voucher_draft(uuid,text)') is not null
+  and to_regprocedure('public.delete_duplicate_student(uuid,text)') is null,
+  'controlled Finance deletion RPCs exist and Student hard-delete is absent'
 );
 select extensions.ok(
   not has_table_privilege('authenticated', 'public.documents', 'DELETE')
   and not has_table_privilege('authenticated', 'public.supplier_bills', 'DELETE')
   and not has_table_privilege('authenticated', 'public.payment_vouchers', 'DELETE')
-  and not has_table_privilege('authenticated', 'public.claims', 'DELETE'),
+  and not has_table_privilege('authenticated', 'public.claims', 'DELETE')
+  and not has_table_privilege('authenticated', 'public.bank_import_rows', 'DELETE'),
   'direct client hard-delete privileges are absent'
 );
 select extensions.ok(
   not has_function_privilege('anon', 'public.save_payment_voucher_draft(jsonb,jsonb)', 'EXECUTE')
   and not has_function_privilege('anon', 'public.issue_payment_voucher(uuid)', 'EXECUTE')
-  and not has_function_privilege('anon', 'public.delete_document_metadata(uuid,text)', 'EXECUTE'),
+  and not has_function_privilege('anon', 'public.delete_document_metadata(uuid,text)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.confirm_bank_reconciliation_allocation(uuid,text)', 'EXECUTE'),
   'anonymous has no privileged Finance RPC execution'
 );
 select extensions.is(
@@ -74,6 +82,48 @@ select extensions.ok(
       and pg_get_constraintdef(oid) like '%management%'
   ),
   'management is an explicit application role'
+);
+select extensions.ok(
+  (select c.reloptions @> array['security_invoker=true']
+   from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relname = 'suppliers_app_safe')
+  and
+  (select c.reloptions @> array['security_invoker=true']
+   from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relname = 'bank_accounts_staff_safe')
+  and not exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname in (
+        'bank_transactions_staff_safe',
+        'bank_import_batches_staff_safe',
+        'bank_import_rows_staff_safe'
+      )
+      and not (c.reloptions @> array['security_invoker=true'])
+  ),
+  'staff-safe Finance views run with invoker security'
+);
+select extensions.ok(
+  not exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in (
+        'confirm_bank_reconciliation_allocation',
+        'reverse_bank_reconciliation_allocation',
+        'discard_bank_import_batch',
+        'archive_bank_import_batch'
+      )
+      and (
+        not p.prosecdef
+        or coalesce(array_to_string(p.proconfig, ','), '') not like '%search_path=""%'
+        or pg_get_functiondef(p.oid) not like '%current_user_has_aal2()%'
+      )
+  ),
+  'privileged bank RPCs use safe definer settings and enforce AAL2 at runtime'
 );
 
 create schema stage1b_finance_test;
@@ -131,7 +181,8 @@ values
   ('44000000-0000-4000-8000-000000000004', 'management@security.invalid', 'authenticated', 'authenticated', '{}', '{}'),
   ('55000000-0000-4000-8000-000000000005', 'entry@security.invalid', 'authenticated', 'authenticated', '{}', '{}'),
   ('66000000-0000-4000-8000-000000000006', 'trainer@security.invalid', 'authenticated', 'authenticated', '{}', '{}'),
-  ('77000000-0000-4000-8000-000000000007', 'inactive@security.invalid', 'authenticated', 'authenticated', '{}', '{}');
+  ('77000000-0000-4000-8000-000000000007', 'inactive@security.invalid', 'authenticated', 'authenticated', '{}', '{}'),
+  ('88000000-0000-4000-8000-000000000008', 'branch@security.invalid', 'authenticated', 'authenticated', '{}', '{}');
 
 update public.app_profiles p set
   role = v.role,
@@ -144,7 +195,8 @@ from (values
   ('44000000-0000-4000-8000-000000000004'::uuid, 'management', true, 'Fictional Management'),
   ('55000000-0000-4000-8000-000000000005'::uuid, 'data_entry', true, 'Fictional Data Entry'),
   ('66000000-0000-4000-8000-000000000006'::uuid, 'trainer', true, 'Fictional Trainer'),
-  ('77000000-0000-4000-8000-000000000007'::uuid, 'finance_staff', false, 'Fictional Inactive')
+  ('77000000-0000-4000-8000-000000000007'::uuid, 'finance_staff', false, 'Fictional Inactive'),
+  ('88000000-0000-4000-8000-000000000008'::uuid, 'branch_manager', true, 'Fictional Branch Manager')
 ) v(id, role, active_status, display_name)
 where p.id = v.id;
 
@@ -156,7 +208,8 @@ from (values
   ('44000000-0000-4000-8000-000000000004'::uuid, 'management'),
   ('55000000-0000-4000-8000-000000000005'::uuid, 'data_entry'),
   ('66000000-0000-4000-8000-000000000006'::uuid, 'trainer'),
-  ('77000000-0000-4000-8000-000000000007'::uuid, 'finance_staff')
+  ('77000000-0000-4000-8000-000000000007'::uuid, 'finance_staff'),
+  ('88000000-0000-4000-8000-000000000008'::uuid, 'branch_manager')
 ) v(user_id, role)
 join public.entities e on e.short_code = 'IETA';
 
@@ -164,8 +217,12 @@ insert into public.user_branch_access (
   user_id, entity_id, branch_id, access_role, active_status
 )
 select
-  '55000000-0000-4000-8000-000000000005', e.id, b.id, 'staff', true
-from public.entities e
+  v.user_id, e.id, b.id, v.access_role, true
+from (values
+  ('55000000-0000-4000-8000-000000000005'::uuid, 'staff'),
+  ('88000000-0000-4000-8000-000000000008'::uuid, 'branch_manager')
+) v(user_id, access_role)
+cross join public.entities e
 join public.branches b on b.entity_id = e.id and b.branch_code = 'KL'
 where e.short_code = 'IETA';
 
@@ -178,6 +235,13 @@ insert into public.operations_user_permissions (user_id, can_manage_students, ca
 values
   ('55000000-0000-4000-8000-000000000005', true, true),
   ('66000000-0000-4000-8000-000000000006', true, true);
+
+insert into public.operations_user_permissions (
+  user_id, can_view_student_pii, can_manage_students,
+  can_manage_programmes, can_manage_enrolments
+) values (
+  '88000000-0000-4000-8000-000000000008', true, true, true, true
+);
 
 insert into public.supplier_bills (
   id, entity_id, description, due_date, total_amount, outstanding_amount,
@@ -275,6 +339,47 @@ insert into public.student_duplicate_reviews (
   'possible'
 );
 
+insert into public.programmes (id, entity_id, programme_code, programme_name)
+select '90000000-0000-4000-8000-000000000020', id, 'MERGE-TST', 'Fictional Merge Programme'
+from public.entities where short_code = 'IETA';
+
+insert into public.programme_intakes (
+  id, programme_id, entity_id, branch_id, intake_code, intake_name, start_date, status
+)
+select '90000000-0000-4000-8000-000000000021',
+  '90000000-0000-4000-8000-000000000020', e.id, b.id,
+  'MERGE-INTAKE', 'Fictional Merge Intake', current_date, 'open'
+from public.entities e
+join public.branches b on b.entity_id = e.id and b.branch_code = 'KL'
+where e.short_code = 'IETA';
+
+insert into public.enrolments (
+  id, enrolment_number, student_id, programme_id, intake_id, entity_id, branch_id, status
+)
+select '90000000-0000-4000-8000-000000000022', 'MERGE-ENROLMENT',
+  '90000000-0000-4000-8000-000000000012',
+  '90000000-0000-4000-8000-000000000020',
+  '90000000-0000-4000-8000-000000000021', e.id, b.id, 'draft'
+from public.entities e
+join public.branches b on b.entity_id = e.id and b.branch_code = 'KL'
+where e.short_code = 'IETA';
+
+insert into public.documents (
+  id, entity_id, document_type, original_filename, storage_path, mime_type,
+  file_size, uploaded_by
+)
+select '90000000-0000-4000-8000-000000000023', id, 'other',
+  'fictional-student.pdf', id::text || '/student/merge-source.pdf',
+  'application/pdf', 12, '11000000-0000-4000-8000-000000000001'
+from public.entities where short_code = 'IETA';
+
+insert into public.document_links (
+  document_id, entity_id, linked_record_type, linked_record_id, created_by
+)
+select '90000000-0000-4000-8000-000000000023', id, 'student',
+  '90000000-0000-4000-8000-000000000012', '11000000-0000-4000-8000-000000000001'
+from public.entities where short_code = 'IETA';
+
 insert into public.documents (
   id, entity_id, document_type, original_filename, storage_path, mime_type,
   file_size, uploaded_by
@@ -293,16 +398,49 @@ from public.entities where short_code = 'IETA';
 
 set local role authenticated;
 select stage1b_finance_test.claim('11000000-0000-4000-8000-000000000001', 'aal1');
-select extensions.is(app_private.current_user_has_app_access(), false, 'Owner is denied without aal2');
+select extensions.ok(
+  app_private.current_user_has_app_access()
+  and not app_private.current_user_has_aal2(),
+  'Owner retains routine application access at aal1'
+);
+select extensions.ok(
+  not app_private.current_user_can('can_view_bank_balances'),
+  'Owner cannot access high-risk bank data at aal1'
+);
+update public.app_profiles set display_name = 'Forbidden AAL1 admin change'
+where id = '22000000-0000-4000-8000-000000000002';
+select extensions.is(
+  (select display_name from public.app_profiles where id = '22000000-0000-4000-8000-000000000002'),
+  'Fictional Finance Manager'::text,
+  'Owner cannot administer accounts at aal1'
+);
 select stage1b_finance_test.claim('11000000-0000-4000-8000-000000000001', 'aal2');
-select extensions.is(app_private.current_user_has_app_access(), true, 'Owner is admitted with aal2');
+select extensions.ok(
+  app_private.current_user_can('can_view_bank_balances'),
+  'Owner may access high-risk bank data at aal2'
+);
+update public.app_profiles set display_name = 'AAL2 admin change'
+where id = '22000000-0000-4000-8000-000000000002';
+select extensions.is(
+  (select display_name from public.app_profiles where id = '22000000-0000-4000-8000-000000000002'),
+  'AAL2 admin change'::text,
+  'Owner may administer accounts at aal2'
+);
 reset role;
 
 set local role authenticated;
 select stage1b_finance_test.claim('22000000-0000-4000-8000-000000000002', 'aal1');
-select extensions.is(app_private.current_user_has_app_access(), false, 'Finance Manager is denied without aal2');
+select extensions.ok(
+  app_private.current_user_has_app_access()
+  and not app_private.current_user_can_high_risk('can_issue_vouchers'),
+  'Finance Manager retains routine access but cannot authorize high-risk work at aal1'
+);
 select stage1b_finance_test.claim('22000000-0000-4000-8000-000000000002', 'aal2');
-select extensions.is(app_private.current_user_has_app_access(), true, 'Finance Manager is admitted with aal2');
+select extensions.ok(
+  app_private.current_user_has_app_access()
+  and app_private.current_user_can_high_risk('can_issue_vouchers'),
+  'Finance Manager may authorize permitted high-risk work at aal2'
+);
 reset role;
 
 set local role authenticated;
@@ -339,10 +477,15 @@ select extensions.is(
   'IETA security fixture'::text,
   'Management cannot routinely edit Finance records'
 );
+select extensions.ok(not stage1b_finance_test.probe(
+  $$update public.claims set status='approved', approved_by='44000000-0000-4000-8000-000000000004', approved_at=now()
+    where id='90000000-0000-4000-8000-000000000005'$$
+), 'Management approval is denied at aal1');
+select stage1b_finance_test.claim('44000000-0000-4000-8000-000000000004', 'aal2');
 select extensions.ok(stage1b_finance_test.probe(
   $$update public.claims set status='approved', approved_by='44000000-0000-4000-8000-000000000004', approved_at=now()
     where id='90000000-0000-4000-8000-000000000005'$$
-), 'Specifically appointed Management can approve another claimant claim');
+), 'Specifically appointed Management can approve another claimant claim at aal2');
 reset role;
 
 set local role authenticated;
@@ -392,12 +535,54 @@ select extensions.ok(not stage1b_finance_test.probe(
 reset role;
 
 set local role authenticated;
+select stage1b_finance_test.claim('88000000-0000-4000-8000-000000000008', 'aal1');
+select extensions.ok(
+  app_private.current_user_has_app_access()
+  and app_private.current_user_has_operations_permission('can_manage_students')
+  and not app_private.current_user_can('can_view_finance'),
+  'Branch Manager receives explicit Student Operations access without Finance access'
+);
+select extensions.ok(
+  (select count(*) > 0 from public.students)
+  and not exists (
+    select 1 from public.students s
+    join public.branches b on b.id = s.home_branch_id
+    where b.branch_code = 'PG'
+  ),
+  'Branch Manager sees assigned KL students and no PG students'
+);
+select extensions.ok(
+  public.generate_student_number((select id from public.entities where short_code = 'IETA'))
+    like 'IETA-STU-%',
+  'Branch Manager may allocate an entity-scoped student number at aal1'
+);
+select extensions.is(
+  (select count(*)::integer from public.get_student_sensitive_identity('90000000-0000-4000-8000-000000000011')),
+  0,
+  'Branch Manager cannot reveal unmasked Student identity at aal1'
+);
+select stage1b_finance_test.claim('88000000-0000-4000-8000-000000000008', 'aal2');
+select extensions.is(
+  (select count(*)::integer from public.get_student_sensitive_identity('90000000-0000-4000-8000-000000000011')),
+  1,
+  'Branch Manager with explicit PII permission may reveal in-scope identity at aal2'
+);
+select extensions.is(
+  (select count(*)::integer from public.get_student_sensitive_identity('90000000-0000-4000-8000-000000000013')),
+  0,
+  'Branch Manager cannot reveal cross-branch identity even at aal2'
+);
+reset role;
+
+set local role authenticated;
 select stage1b_finance_test.claim('66000000-0000-4000-8000-000000000006');
 select extensions.ok(
-  not app_private.current_user_has_app_access()
+  app_private.current_user_has_app_access()
+  and app_private.current_user_has_operations_permission('can_manage_students')
+  and not app_private.current_user_can('can_approve_claims')
   and (select count(*) = 0 from public.supplier_bills)
   and (select count(*) = 0 from public.documents),
-  'Trainer has no application, Finance or document access despite stale grants'
+  'Non-Finance operations user cannot inherit Finance access from a stale Finance permission row'
 );
 reset role;
 
@@ -416,7 +601,7 @@ select extensions.ok(not stage1b_finance_test.probe('select * from public.suppli
 reset role;
 
 set local role authenticated;
-select stage1b_finance_test.claim('44000000-0000-4000-8000-000000000004');
+select stage1b_finance_test.claim('44000000-0000-4000-8000-000000000004', 'aal2');
 select extensions.ok(not stage1b_finance_test.probe(
   $$update public.claims set status='approved', approved_by='44000000-0000-4000-8000-000000000004', approved_at=now()
     where id='90000000-0000-4000-8000-000000000009'$$
@@ -436,6 +621,22 @@ select extensions.ok(
 reset role;
 
 set local role authenticated;
+select stage1b_finance_test.claim('22000000-0000-4000-8000-000000000002', 'aal1');
+select extensions.ok(
+  (select count(*) = 1 from public.supplier_bills)
+  and (select count(*) = 0 from public.payment_vouchers),
+  'Finance Manager may read routine scoped Finance data but not sensitive vouchers at aal1'
+);
+select extensions.ok(not stage1b_finance_test.probe(
+  $$select public.issue_payment_voucher('90000000-0000-4000-8000-000000000003')$$
+), 'Finance Manager cannot issue a voucher at aal1');
+select extensions.ok(not stage1b_finance_test.probe(
+  $$select public.save_payment_voucher_draft(
+    (select jsonb_build_object('entity_id',id,'payee','AAL1 blocked','purpose','AAL1 blocked','total_amount',1)
+     from public.entities where short_code='IETA'),
+    '[{"description":"AAL1 blocked","amount":1}]'::jsonb
+  )$$
+), 'Finance Manager cannot prepare a payment voucher at aal1');
 select stage1b_finance_test.claim('22000000-0000-4000-8000-000000000002', 'aal2');
 select extensions.lives_ok(
   $$select public.issue_payment_voucher('90000000-0000-4000-8000-000000000003')$$,
@@ -464,19 +665,75 @@ reset role;
 set local role authenticated;
 select stage1b_finance_test.claim('55000000-0000-4000-8000-000000000005');
 select extensions.ok(not stage1b_finance_test.probe(
-  $$select public.merge_students('90000000-0000-4000-8000-000000000011','90000000-0000-4000-8000-000000000012','forbidden')$$
-), 'Data Entry cannot merge or permanently delete students');
+  $$select public.merge_students('90000000-0000-4000-8000-000000000011','90000000-0000-4000-8000-000000000013','cross branch')$$
+), 'Explicit Student permission never permits a cross-branch merge');
 reset role;
 
 set local role authenticated;
-select stage1b_finance_test.claim('11000000-0000-4000-8000-000000000001', 'aal2');
-select extensions.ok(not stage1b_finance_test.probe(
-  $$select public.delete_duplicate_student('90000000-0000-4000-8000-000000000012','must merge')$$
-), 'even Owner cannot directly delete a duplicate student with review dependencies');
+select stage1b_finance_test.claim('11000000-0000-4000-8000-000000000001', 'aal1');
+select extensions.ok(
+  exists (select 1 from public.enrolments where student_id='90000000-0000-4000-8000-000000000012')
+  and exists (
+    select 1 from public.document_links
+    where linked_record_type='student' and linked_record_id='90000000-0000-4000-8000-000000000012'
+  ),
+  'soft-merge fixture begins with dependencies on the source Student'
+);
 select extensions.lives_ok(
   $$select public.merge_students('90000000-0000-4000-8000-000000000012','90000000-0000-4000-8000-000000000011','reviewed duplicate')$$,
-  'Owner may use the controlled merge workflow for a linked duplicate student'
+  'Owner may use the historical soft-merge workflow at aal1'
 );
+select extensions.ok(exists (
+  select 1 from public.students
+  where id='90000000-0000-4000-8000-000000000012'
+    and lifecycle_status='merged'
+    and merged_into_student_id='90000000-0000-4000-8000-000000000011'
+    and active_status=false
+), 'soft merge retains the inactive source Student and merged-into link');
+select extensions.ok(
+  exists (select 1 from public.enrolments where id='90000000-0000-4000-8000-000000000022' and student_id='90000000-0000-4000-8000-000000000011')
+  and exists (
+    select 1 from public.document_links
+    where document_id='90000000-0000-4000-8000-000000000023'
+      and linked_record_type='student'
+      and linked_record_id='90000000-0000-4000-8000-000000000011'
+  ),
+  'soft merge moves enrolment and document dependencies to the target Student'
+);
+select extensions.ok(
+  exists (
+    select 1 from public.student_merge_events
+    where source_student_id='90000000-0000-4000-8000-000000000012'
+      and target_student_id='90000000-0000-4000-8000-000000000011'
+  )
+  and exists (
+    select 1 from public.audit_logs
+    where action='students_merged'
+      and payload ->> 'source_student_id'='90000000-0000-4000-8000-000000000012'
+  ),
+  'soft merge preserves merge-event and audit lineage'
+);
+update public.students
+set active_status=true, preferred_name='Forbidden reactivation'
+where id='90000000-0000-4000-8000-000000000012';
+select extensions.ok(exists (
+  select 1 from public.students
+  where id='90000000-0000-4000-8000-000000000012'
+    and active_status=false
+    and preferred_name is distinct from 'Forbidden reactivation'
+), 'merged source cannot be reactivated through ordinary Student update access');
+select extensions.ok(not stage1b_finance_test.probe(
+  $$insert into public.enrolments(
+      enrolment_number,student_id,programme_id,intake_id,entity_id,branch_id,status
+    )
+    select 'FORBIDDEN-MERGED',
+      '90000000-0000-4000-8000-000000000012',
+      '90000000-0000-4000-8000-000000000020',
+      '90000000-0000-4000-8000-000000000021', e.id, b.id, 'draft'
+    from public.entities e
+    join public.branches b on b.entity_id=e.id and b.branch_code='KL'
+    where e.short_code='IETA'$$
+), 'merged source cannot receive a new enrolment');
 select extensions.ok(exists (
   select 1 from public.student_duplicate_reviews
   where student_id='90000000-0000-4000-8000-000000000011'
@@ -486,7 +743,7 @@ select extensions.ok(exists (
 reset role;
 
 set local role authenticated;
-select stage1b_finance_test.claim('33000000-0000-4000-8000-000000000003');
+select stage1b_finance_test.claim('33000000-0000-4000-8000-000000000003', 'aal2');
 select extensions.ok(not stage1b_finance_test.probe(
   $$select public.save_payment_voucher_draft(
     (select jsonb_build_object('entity_id',id,'payee','Rollback fixture','purpose','Rollback fixture','total_amount',1)

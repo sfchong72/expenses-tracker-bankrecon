@@ -9,7 +9,7 @@ type Row = Record<string, any>;
 
 const staffRoles = ["finance_manager", "finance_staff", "management", "data_entry"];
 const roleHelp: Record<string, string> = {
-  finance_manager: "Full Finance operations, approvals, voids and eligible deletions. MFA required; bank balances remain hidden.",
+  finance_manager: "Full Finance operations. MFA is required for approvals, finalization, sensitive access and eligible deletion; bank balances remain hidden.",
   finance_staff: "Create and edit Finance drafts and documents; no approval, issue, void or permanent deletion.",
   management: "Read Finance reporting; approval only when the specific permission is appointed.",
   data_entry: "Separate personal intern/data-entry account for student corrections and permitted drafts only.",
