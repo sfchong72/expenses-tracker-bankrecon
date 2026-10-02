@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:financeops": "node --import ./lib/financeops/__tests__/register-ts.mjs --test \"lib/financeops/__tests__/*.test.ts\"",
-    "test:financeops:integration": "node --import ./lib/financeops/__tests__/register-ts.mjs --test lib/financeops/__integration__/local.integration.ts"
+    "test:financeops:integration": "node --import ./lib/financeops/__tests__/register-ts.mjs --test lib/financeops/__integration__/local.integration.ts lib/financeops/__integration__/payments.integration.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.0",

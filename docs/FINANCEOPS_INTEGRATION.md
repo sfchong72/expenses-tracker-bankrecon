@@ -109,9 +109,13 @@ Implemented (D1): the Hub signs in server-side as a dedicated Supabase Auth user
 
 A stored DB-user password is the simplest RLS-preserving option and is acceptable only as a Vercel server-side secret. Alternatives considered: minting JWTs requires the project JWT secret (as sensitive as the service-role key — rejected); a SECURITY DEFINER intake RPC granted to a dedicated role (post-Phase-1 hardening, also makes bill + document + intake creation atomic) — to be reconsidered after Phase 1 proves useful. No silent redesign was made.
 
+## Payment capture (Payment Register; migration 0024, local candidate)
+
+Separate from invoice intake: `POST /api/integrations/financeops/v1/payment-intakes` (multipart `metadata` + `file_0..file_4`) and `GET .../payment-intakes/:intake_id`. Same HMAC design, timestamp window, key rotation, per-key entity allow-list, registry identity and fail-closed order, plus its own feature flag `FINANCEOPS_PAYMENT_REGISTER_ENABLED` (default OFF; it is checked before authentication). FinanceOps may create an OPERATIONAL Payment Register record and attach evidence; the status it can set is limited to `captured`, `documents_pending` and `ready_for_bank_match`. It can never confirm a bank match, mark finance review / ready for SQL / posted / reconciled, approve an exception, read bank rows, or create `bill_payments` or vouchers; the schema rejects those field names outright and the 0024 triggers refuse them even if sent. Details, matching rules, document rules, permissions, deployment steps and limitations: `docs/FINANCEOPS_PAYMENT_RECONCILIATION_HANDOVER.md`.
+
 ## Not implemented here
 
-Payment-evidence tables and link type, any change to `user_can_access_linked_record`, new SECURITY DEFINER RPCs, a database-level FinanceOps release gate, the FinanceOps Auth user and registry row (Production), Phase 1B, SQL Account, reconciliation, claims automation, large-file signed uploads, notification/outbox, atomic bill + document + intake creation (a SECURITY DEFINER RPC; post-Phase-1 hardening).
+Any change to `user_can_access_linked_record` (the Payment Register has its own document table and bucket instead), new SECURITY DEFINER RPCs, a database-level FinanceOps release gate, the FinanceOps Auth user and registry row (Production), Phase 1B, SQL Account, reconciliation, claims automation, large-file signed uploads, notification/outbox, atomic bill + document + intake creation (a SECURITY DEFINER RPC; post-Phase-1 hardening).
 
 ## Operational limitations
 
