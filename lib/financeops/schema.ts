@@ -54,6 +54,11 @@ export type Issue = { path: string; code: IssueCode };
 
 export type FinanceOpsBillIntake = {
   intake_id: string;
+  /**
+   * Optional: the earlier UNRESOLVED intake this one replaces (D10 path 2). Omitted (never null) when absent, so
+   * existing payload hashes are unchanged. Supersession rules are enforced by the database, not here.
+   */
+  supersedes_intake_id?: string;
   source: {
     channel: "telegram";
     chat_id: string;
@@ -277,7 +282,7 @@ function confidence(v: unknown, p: string, ctx: Ctx): number {
 
 // ---------------------------------------------------------------- main parser
 
-const TOP_LEVEL_KEYS = ["intake_id", "source", "entity_code", "supplier", "invoice", "category_hint", "extraction", "document", "notes"] as const;
+const TOP_LEVEL_KEYS = ["intake_id", "supersedes_intake_id", "source", "entity_code", "supplier", "invoice", "category_hint", "extraction", "document", "notes"] as const;
 
 export function parseBillIntake(input: unknown): ParseResult {
   if (!isPlainObject(input)) return { ok: false, issues: [{ path: "", code: "not_an_object" }] };
@@ -291,6 +296,15 @@ export function parseBillIntake(input: unknown): ParseResult {
   else if (typeof intakeIdRaw !== "string") ctx.issues.push({ path: "intake_id", code: "invalid_type" });
   else if (!/^[A-Za-z0-9_-]{8,64}$/.test(intakeIdRaw)) ctx.issues.push({ path: "intake_id", code: "invalid_format" });
   else intakeId = intakeIdRaw;
+
+  // supersedes_intake_id (optional; same format as intake_id; never null - omit the key instead)
+  let supersedes: string | undefined;
+  const supersedesRaw = input.supersedes_intake_id;
+  if (supersedesRaw !== undefined) {
+    if (typeof supersedesRaw !== "string") ctx.issues.push({ path: "supersedes_intake_id", code: "invalid_type" });
+    else if (!/^[A-Za-z0-9_-]{8,64}$/.test(supersedesRaw)) ctx.issues.push({ path: "supersedes_intake_id", code: "invalid_format" });
+    else supersedes = supersedesRaw;
+  }
 
   // source
   const srcObj = objectAt(input, "source", "", ctx, true);
@@ -433,7 +447,7 @@ export function parseBillIntake(input: unknown): ParseResult {
 
   return {
     ok: true,
-    value: { intake_id: intakeId, source, entity_code: entityCode, supplier, invoice, category_hint: categoryHint, extraction, document, notes },
+    value: { intake_id: intakeId, ...(supersedes !== undefined ? { supersedes_intake_id: supersedes } : {}), source, entity_code: entityCode, supplier, invoice, category_hint: categoryHint, extraction, document, notes },
   };
 }
 

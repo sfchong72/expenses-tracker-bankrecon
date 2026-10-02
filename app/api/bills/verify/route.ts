@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { canVerifyBills, VERIFY_FROM_STATUS, VERIFY_TO_STATUS } from "@/lib/bill-verification";
+import { evaluateFinanceOpsVerifyGate } from "@/lib/financeops/gate";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -27,6 +28,12 @@ export async function POST(request: Request) {
   if (bill.data.payment_status !== VERIFY_FROM_STATUS) {
     return NextResponse.json({ error: "Only draft bills can be verified" }, { status: 409 });
   }
+
+  // Q5 (application gate): a bill created from a FinanceOps intake needs a human "Data Verified" on that intake first.
+  // Ordinary bills have no intake row and are unaffected. The lookup uses the caller's own session; failure fails closed.
+  const intake = await supabase.from("finance_intake_submissions").select("review_status").eq("supplier_bill_id", billId);
+  const gate = evaluateFinanceOpsVerifyGate({ error: intake.error?.message, rows: intake.data });
+  if (!gate.allow) return NextResponse.json({ error: gate.message, code: gate.error }, { status: gate.status });
 
   // Guarded update: only a row that is still draft is changed, and only to unpaid.
   const updated = await supabase.from("supplier_bills").update({ payment_status: VERIFY_TO_STATUS }).eq("id", billId).eq("payment_status", VERIFY_FROM_STATUS).select("id");

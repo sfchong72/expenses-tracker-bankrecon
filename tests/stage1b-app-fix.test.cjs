@@ -29,6 +29,7 @@ function loadModule(rel, deps = {}, globals = {}) {
   return mod.exports;
 }
 const verification = loadModule("lib/bill-verification.ts");
+const financeopsGate = loadModule("lib/financeops/gate.ts");
 const NextResponse = { json: (body, init) => ({ status: (init && init.status) || 200, body }) };
 
 // ---------- fake supabase ----------
@@ -57,7 +58,7 @@ function makeClient({ user, handler }) {
   };
   return client;
 }
-const serverDeps = (client) => ({ "@/lib/supabase/server": { createClient: async () => client }, "next/server": { NextResponse }, "@/lib/bill-verification": verification });
+const serverDeps = (client) => ({ "@/lib/supabase/server": { createClient: async () => client }, "next/server": { NextResponse }, "@/lib/bill-verification": verification, "@/lib/financeops/gate": financeopsGate });
 const jsonRequest = (body) => new Request("http://localhost/api/test", { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
 const writes = (client) => client.log.filter((q) => q.op !== "select");
 const tablesTouched = (client) => client.log.map((q) => q.table);
@@ -79,6 +80,8 @@ function verifyScenario(o = {}) {
         return o.revertResult ?? { data: [{ id: BILL }], error: null };
       }
       if (q.table === "audit_logs") return o.auditResult ?? { data: null, error: null };
+      // Q5 gate lookup: a bill with no FinanceOps intake has no row (Stage 1B behaviour unchanged).
+      if (q.table === "finance_intake_submissions") return o.intakeResult ?? { data: [], error: null };
       throw new Error(`unexpected query on ${q.table}`);
     },
   });
@@ -509,12 +512,79 @@ test("payment entry: AAL2 / Owner-Finance-Manager enforcement stays in the datab
   assert.ok(!/aal|mfa|role|owner|finance_manager|service[_-]?role/i.test(uiFns.savePayment), "savePayment must not add role/AAL handling");
 });
 
-test("scope: migrations 0021/0022 are byte-identical to the release (git blob hashes) and no 0023 exists", () => {
+// =====================================================================================
+// FinanceOps Q5 application gate: a FinanceOps-origin bill needs its intake Data Verified before draft -> unpaid.
+// The universal Stage 1B trigger/policy is NOT changed; ordinary bills (no intake row) behave exactly as before.
+// =====================================================================================
+const intakeQueries = (client) => client.log.filter((q) => q.table === "finance_intake_submissions");
+
+test("Q5/17: a FinanceOps-linked bill whose intake is not data_verified is refused with a clear code; nothing is written", async () => {
+  for (const review_status of ["pending_review", "needs_attention", "duplicate_suspected", "rejected"]) {
+    const s = verifyScenario({ role: "finance_staff", intakeResult: { data: [{ review_status }], error: null } });
+    const res = await s.post({ bill_id: BILL });
+    assert.equal(res.status, 409, review_status);
+    assert.equal(res.body.code, "financeops_intake_not_data_verified");
+    assert.match(res.body.error, /Data Verified/);
+    assert.equal(writes(s.client).length, 0, review_status);
+    const q = intakeQueries(s.client);
+    assert.equal(q.length, 1);
+    assert.deepEqual(q[0].filters, [["eq", "supplier_bill_id", BILL]]);
+  }
+});
+
+test("Q5/18: once the intake is data_verified the same bill is released by an authorised role, with the usual guarded update and audit", async () => {
+  for (const role of ["owner", "finance_manager", "finance_staff"]) {
+    const s = verifyScenario({ role, intakeResult: { data: [{ review_status: "data_verified" }], error: null } });
+    const res = await s.post({ bill_id: BILL });
+    assert.equal(res.status, 200, role);
+    assert.deepEqual(res.body, { ok: true, bill_id: BILL, previous_status: "draft", status: "unpaid" });
+    const w = writes(s.client);
+    assert.deepEqual(w.map((q) => q.table), ["supplier_bills", "audit_logs"]);
+    assert.deepEqual(w[0].payload, { payment_status: "unpaid" });
+  }
+});
+
+test("Q5/19: an ordinary manually-created bill (no intake row) keeps the exact Stage 1B behaviour", async () => {
+  const s = verifyScenario({ role: "finance_staff" });
+  const res = await s.post({ bill_id: BILL });
+  assert.equal(res.status, 200);
+  assert.deepEqual(writes(s.client).map((q) => q.table), ["supplier_bills", "audit_logs"]);
+  assert.equal(intakeQueries(s.client).length, 1); // only a read
+});
+
+test("Q5: if the intake lookup fails the release fails closed (cannot tell whether the bill is FinanceOps-linked)", async () => {
+  const s = verifyScenario({ role: "finance_staff", intakeResult: { data: null, error: { message: "permission denied for table finance_intake_submissions" } } });
+  const res = await s.post({ bill_id: BILL });
+  assert.equal(res.status, 500);
+  assert.equal(res.body.code, "financeops_gate_unavailable");
+  assert.equal(writes(s.client).length, 0);
+});
+
+test("Q5: the gate comes after the role and bill checks, so roles that may not verify never reach it and learn nothing", async () => {
+  for (const role of ["data_entry", "management", "read_only"]) {
+    const s = verifyScenario({ role });
+    assert.equal((await s.post({ bill_id: BILL })).status, 403, role);
+    assert.equal(intakeQueries(s.client).length, 0, role);
+  }
+  const notDraft = verifyScenario({ role: "owner", bill: { id: BILL, entity_id: ENTITY, payment_status: "unpaid" } });
+  assert.equal((await notDraft.post({ bill_id: BILL })).status, 409);
+  assert.equal(intakeQueries(notDraft.client).length, 0);
+});
+
+test("Q5: the gate only reads; this route never writes finance_intake_submissions or touches Stage 1B policies", async () => {
+  const src = fs.readFileSync(path.join(ROOT, "app/api/bills/verify/route.ts"), "utf8");
+  assert.ok(!/from("finance_intake_submissions")s*.(insert|update|delete|upsert)/.test(src));
+  assert.ok(/service[_-]?role/i.test(src) === false);
+});
+
+test("scope: migrations 0021/0022/0023 are byte-identical to the release (git blob hashes) and no 0024+ exists", () => {
   const gitBlobSha = (rel) => {
     const lf = Buffer.from(fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n"), "utf8");
     return crypto.createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${lf.length}\0`), lf])).digest("hex");
   };
   assert.equal(gitBlobSha("supabase/migrations/0021_stage1b_preflight_security_hardening.sql"), "d0de140e12a903944d3fea0543be8c760628ecbf");
   assert.equal(gitBlobSha("supabase/migrations/0022_stage1b_finance_security_boundary.sql"), "1eadd009af9f127eabc1f371c33548ad627d7fb1");
-  assert.ok(!fs.readdirSync(path.join(ROOT, "supabase/migrations")).some((n) => /^0023/.test(n)));
+  // 0023 is applied to Production and immutable; this application phase adds no migration.
+  assert.equal(gitBlobSha("supabase/migrations/0023_financeops_intake_persistence.sql"), "b1a477448c1529a12fddd32f4822e2e809e39bc7");
+  assert.ok(!fs.readdirSync(path.join(ROOT, "supabase/migrations")).some((n) => /^00(2[4-9]|[3-9]d)/.test(n)));
 });
