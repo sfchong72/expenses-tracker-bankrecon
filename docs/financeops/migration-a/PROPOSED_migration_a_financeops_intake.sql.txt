@@ -2,10 +2,18 @@
 -- PROPOSED "Migration A" — FinanceOps Phase 1A intake persistence.
 --
 -- STATUS: DESIGN DRAFT FOR REVIEW. THIS IS NOT A MIGRATION.
+--   Owner decisions applied: Q1 data_verified; Q2 registry kept; Q3 two definer helpers kept (search_path='');
+--   Q4 D11-literal central visibility; Q5 (modified) NO database gate on draft->unpaid - the FinanceOps-origin
+--   gate is application-only and lives outside this file; Q6 no AAL2 for entity resolution; Q7 unresolved
+--   junk may be rejected; Q8 links cleared (intake preserved) on supported draft-bill/document deletion;
+--   Q9 no API delete path and no service-role cleanup path. Added invariant: data_verified => process_state='complete'.
 --   * Not numbered, not under supabase/migrations/, deliberately named .sql.txt.
---   * NOT applied anywhere. NOT parsed against a real database yet (syntax-parsed only).
---   * Must be replayed in a disposable local Supabase stack (0001-0018, 0020, 0021, 0022) and
---     covered by pgTAP before any Production consideration. No `db push`.
+--   * NOT applied to any shared or Production database. It HAS been executed only in a disposable local
+--     Supabase stack (replay 0001-0018, 0020, 0021, 0022, then this file) and covered by pgTAP, a two-session
+--     race check and mutation checks (see MIGRATION_A_REVIEW_PACKAGE.md). No `db push`.
+--   * Application ordering note: a document must be inserted AND linked (document_links) to a same-entity bill
+--     BEFORE the intake references it; documents RLS only exposes a document through a link, and the row trigger
+--     reads the document as the calling user.
 --   * The final number is assigned only when approved (next free number after 0022).
 --
 -- Adds ONLY new objects. Does NOT modify 0020/0021/0022, any existing table, policy, trigger
@@ -201,6 +209,8 @@ create table public.finance_intake_submissions (
   -- An unresolved row is always 'awaiting_entity', and 'awaiting_entity' only exists while unresolved.
   constraint fis_awaiting_entity_state check ((entity_id is null) = (process_state = 'awaiting_entity')),
   constraint fis_data_verified_needs_review check (review_status <> 'data_verified' or (reviewed_at is not null and entity_id is not null)),
+  -- Q-review: a row can never be data_verified while its mechanical state is bill_created / document_attached.
+  constraint fis_data_verified_needs_complete check (review_status <> 'data_verified' or process_state = 'complete'),
   constraint fis_resolution_note_pair check ((entity_resolved_at is null) = (entity_resolution_note is null)),
   constraint fis_resolution_note_length check (entity_resolution_note is null or length(btrim(entity_resolution_note)) >= 3),
   constraint fis_no_self_supersede check (supersedes_intake_id is distinct from intake_id),
@@ -236,6 +246,8 @@ as $$
         and p.role in ('owner', 'finance_manager', 'finance_staff')
     );
 $$;
+-- (Reviewer set is exactly D11 / Q4: Owner, Finance Manager, Finance Staff. data_entry, management,
+--  read_only and every non-finance role are excluded.)
 
 -- Boolean existence only: lets the resolution trigger and the queue see a successor intake that the
 -- caller's entity scope would otherwise hide. VOLATILE so it takes a fresh snapshot inside a
@@ -248,7 +260,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not app_private.current_user_has_app_access() then
+  if not app_private.current_user_has_finance_role() then
     return false;
   end if;
   return exists (select 1 from public.finance_intake_submissions s where s.supersedes_intake_id = p_intake_id);
@@ -384,6 +396,17 @@ begin
   end if;
   new.updated_at := now();
 
+  -- Terminal review states are frozen (checked first, so a rejected unresolved intake cannot be resolved either).
+  if old.review_status in ('data_verified', 'rejected') then
+    raise exception 'A finance intake that is % cannot be changed', old.review_status;
+  end if;
+
+  -- The kill switch freezes the creating identity: once it is no longer an active registry identity it
+  -- cannot advance (or review) its own rows through any path.
+  if old.created_by is not distinct from actor and not is_integration then
+    raise exception 'The creating FinanceOps identity is no longer active in the integration registry';
+  end if;
+
   -- D10 path 1: entity resolution (a standalone, set-once action by Finance Staff or above).
   if old.entity_id is null and new.entity_id is not null then
     if is_integration or not app_private.current_user_can_review_unresolved_intakes() then
@@ -394,7 +417,8 @@ begin
     end if;
     select e.short_code into resolved_code from public.entities e where e.id = new.entity_id;
     if resolved_code is null or resolved_code not in ('IEA', 'IETA', 'PLC', 'KALER') then
-      raise exception 'The entity must be one of the approved entities';
+      -- (an entity the caller cannot access is invisible through entities RLS and lands here too)
+      raise exception 'The entity must be one of the approved entities, and one you can access';
     end if;
     if new.entity_resolution_note is null or length(btrim(new.entity_resolution_note)) < 3 then
       raise exception 'A resolution note is required';
@@ -416,11 +440,6 @@ begin
      or new.entity_resolved_at is distinct from old.entity_resolved_at
      or new.entity_resolution_note is distinct from old.entity_resolution_note then
     raise exception 'The entity and its resolution trail cannot be changed once set';
-  end if;
-
-  -- Terminal review states are frozen.
-  if old.review_status in ('data_verified', 'rejected') then
-    raise exception 'A finance intake that is % cannot be changed', old.review_status;
   end if;
 
   -- Record links must belong to the same entity, be the original document, and are set once.
@@ -499,6 +518,9 @@ begin
         if new.review_status = 'data_verified'
            and (new.supplier_bill_id is null or new.document_id is null) then
           raise exception 'Data can only be verified once the draft bill and the original document are linked';
+        end if;
+        if new.review_status = 'data_verified' and new.process_state <> 'complete' then
+          raise exception 'Data can only be verified once process_state is complete';
         end if;
         new.reviewed_by := actor;
         new.reviewed_at := now();
@@ -635,7 +657,7 @@ grant select, insert, update on table public.finance_intake_submissions to authe
 create policy fii_select on public.finance_integration_identities for select to authenticated
   using (
     app_private.current_user_has_app_access()
-    and (user_id = auth.uid() or app_private.current_user_is_owner())
+    and (user_id = (select auth.uid()) or app_private.current_user_is_owner())
   );
 create policy fii_owner_write on public.finance_integration_identities for all to authenticated
   using (app_private.current_user_is_owner() and app_private.current_user_has_aal2())
@@ -649,7 +671,7 @@ create policy fis_select on public.finance_intake_submissions for select to auth
   using (
     app_private.current_user_has_app_access()
     and (
-      created_by = auth.uid()
+      created_by = (select auth.uid())
       or (entity_id is null and app_private.current_user_can_review_unresolved_intakes())
       or (
         entity_id is not null
@@ -663,12 +685,12 @@ create policy fis_select on public.finance_intake_submissions for select to auth
 -- (promoting it to finance_staff makes this policy fail closed), only for its allowed entities.
 create policy fis_insert_integration on public.finance_intake_submissions for insert to authenticated
   with check (
-    created_by = auth.uid()
+    created_by = (select auth.uid())
     and app_private.current_user_is_data_entry()
     and review_status in ('pending_review', 'duplicate_suspected')
     and exists (
       select 1 from public.finance_integration_identities i
-      where i.user_id = auth.uid() and i.active_status = true and i.integration = 'financeops'
+      where i.user_id = (select auth.uid()) and i.active_status = true and i.integration = 'financeops'
         and (entity_id is null or entity_id = any (i.allowed_entity_ids))
     )
     and (entity_id is null or app_private.user_can_access_entity(entity_id))
@@ -678,16 +700,16 @@ create policy fis_insert_integration on public.finance_intake_submissions for in
 -- (a) the FinanceOps identity advances its own mechanical columns;
 create policy fis_update_integration on public.finance_intake_submissions for update to authenticated
   using (
-    created_by = auth.uid()
+    created_by = (select auth.uid())
     and app_private.current_user_is_data_entry()
-    and exists (select 1 from public.finance_integration_identities i where i.user_id = auth.uid() and i.active_status = true and i.integration = 'financeops')
+    and exists (select 1 from public.finance_integration_identities i where i.user_id = (select auth.uid()) and i.active_status = true and i.integration = 'financeops')
   )
   with check (
-    created_by = auth.uid()
+    created_by = (select auth.uid())
     and app_private.current_user_is_data_entry()
     and exists (
       select 1 from public.finance_integration_identities i
-      where i.user_id = auth.uid() and i.active_status = true and i.integration = 'financeops'
+      where i.user_id = (select auth.uid()) and i.active_status = true and i.integration = 'financeops'
         and (entity_id is null or entity_id = any (i.allowed_entity_ids))
     )
   );

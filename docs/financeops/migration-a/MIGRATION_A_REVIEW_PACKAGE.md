@@ -1,171 +1,116 @@
-# FinanceOps Phase 1A — Migration A review package (DESIGN ONLY)
+# FinanceOps Phase 1A — Migration A review package (v2: decisions applied, disposable validation passed)
 
-Status: **proposal for Claire's approval. Nothing here has been applied, deployed, or run against any database.** The SQL is in [`PROPOSED_migration_a_financeops_intake.sql.txt`](PROPOSED_migration_a_financeops_intake.sql.txt) — deliberately outside `supabase/migrations/`, un-numbered, and named `.sql.txt` so no tooling can pick it up. Authoritative design: `FINANCEOPS_HUB_PHASE1_IMPLEMENTATION_SPEC.md` and `FINANCEOPS_PHASE1_CLAUDE_HANDOVER.md` (D1–D11 preserved).
+**Status: READY FOR OWNER APPROVAL TO NUMBER. Not numbered. Not applied to Production. Not deployed.** The SQL is [`PROPOSED_migration_a_financeops_intake.sql.txt`](PROPOSED_migration_a_financeops_intake.sql.txt) — un-numbered, `.sql.txt`, deliberately outside `supabase/migrations/`. Tests and evidence: [`tests/`](tests/) and [`VALIDATION_EVIDENCE.md`](VALIDATION_EVIDENCE.md). Design authority: `FINANCEOPS_HUB_PHASE1_IMPLEMENTATION_SPEC.md` and `FINANCEOPS_PHASE1_CLAUDE_HANDOVER.md` (D1–D11 preserved).
 
-**Validation actually done on the SQL:** top-level syntax parse (46 statements) and a PL/pgSQL body parse of all four functions with the Postgres parser (WASM, no database). **Not done:** execution against Postgres, replay on 0001–0022, pgTAP, advisors. Those are the next gate and are listed in §9.
+Base: released `origin/main` = `31e84d3d56cf1ee8ed047ea2873147fa71119cf3` (Stage 1B complete). Migration `0022` blob `1eadd009af9f127eabc1f371c33548ad627d7fb1` unchanged.
 
 ---
 
-## 1. Stage 1B compatibility review (released `main` = `31e84d3`)
+## 1. Owner decisions Q1–Q9 — how each is applied
 
-Released main = Stage 1B commit `338125a` + four application commits (`b08a302`, `e2aefea`, `93447b1`, `31e84d3`). `0022` is byte-identical (Git blob `1eadd009…`). The four commits touch only `app/api/bills/verify/route.ts`, `app/api/payment-vouchers/generate/route.ts`, `app/api/recurring/generate/route.ts`, `app/phase2-workspace.tsx`, `lib/bill-verification.ts`, `tests/stage1b-app-fix.test.cjs` — **no overlap** with the FinanceOps branch (rebase was conflict-free; all five commits patch-identical).
-
-| Earlier FinanceOps assumption | Status on released main |
-|---|---|
-| Manual bill form defaulted to `unpaid` (would fail Stage 1B RLS) | **Fixed on main** (`draft` default; `created_by` now sent). |
-| Draft bills appeared in "Awaiting Payment" / could start a PV | **Fixed on main** (`isBillPayable`, `/api/payment-vouchers/generate` returns 409 for draft). *Still true:* the `save_payment_voucher_draft` RPC itself does not check bill status (0022 unchanged) — DB-level guard remains a separate later item, not part of Migration A. |
-| `data_entry` cannot move a bill out of `draft` | **Confirmed in 0022** (`enforce_finance_record_state`: "Data Entry users may only maintain bill drafts") and by RLS insert (`payment_status = 'draft'`, `created_by = auth.uid()`). So FinanceOps (data_entry) cannot do `draft → unpaid` at the database level. |
-| Who releases `draft → unpaid` | **Released as** `POST /api/bills/verify` (Owner / Finance Manager / Finance Staff, via `lib/bill-verification.ts`), audited as `supplier_bill_verified`. The DB trigger only blocks `data_entry`; the app narrows to the three roles. The same three roles are the D11 reviewer set — the constant can be reused for the future "Resolve entity" UI gate (the database stays authoritative). |
-| Insert must carry `created_by = auth.uid()` | **Confirmed** (e2aefea). FinanceOps persistence must send the identity's user id (from its signed-in session) on every bill insert. |
-| Middleware exemption | `lib/supabase/middleware.ts` unchanged on main; the `/api/integrations/financeops/v1/` exemption applies cleanly. |
-| Recurring bills start as `draft` | Confirmed; irrelevant to intake persistence. |
-
-**Terminology collision (needs a decision, Q1).** Stage 1B now calls `draft → unpaid` "**verify**" ("Verify & Mark Ready for Payment", audit `supplier_bill_verified`). My earlier docs used "Verified" for the intern's data-check. To avoid two meanings of "verified", this proposal names the intake-level state **`data_verified`** (extracted data matches the original document; D2) and leaves "verify / ready for payment" to the Stage 1B route. `data_verified` never changes `supplier_bills.payment_status`.
-
-## 2. Scope
-
-**In Migration A:** two new tables, five functions (two `SECURITY DEFINER`, three triggers), three triggers, seven policies on the two tables, one view. Nothing existing is altered.
-
-**Not in Migration A** (unchanged/deferred): any change to 0020/0021/0022, `supplier_bills`/`documents`/`document_links`/Storage/`bill_payments`/vouchers/claims/bank/reconciliation; `payment_evidence_*` and the `payment_evidence` link type (Migration B, edits `user_can_access_linked_record`); the draft guard in `save_payment_voucher_draft`; any role (D1: no `financeops_intake` role); AAL2 rules; SQL Account.
-
-## 3. Object inventory
-
-### 3.1 `public.finance_integration_identities` (the FinanceOps designation registry — *proposal Q2*)
-Not a role. Names which active `data_entry` user is the FinanceOps identity and which entities it may submit for.
-
-| Column | Type / default | Notes |
+| Q | Decision | Where / how applied |
 |---|---|---|
-| `user_id` | uuid PK → `auth.users` ON DELETE CASCADE | |
-| `integration` | text NOT NULL default `'financeops'` | CHECK `= 'financeops'` |
-| `active_status` | boolean NOT NULL default true | kill-switch |
-| `allowed_entity_ids` | uuid[] NOT NULL | CHECK 1–4 elements; trigger: each must be an existing entity with short_code in IEA/IETA/PLC/KALER, no duplicates |
-| `note`, `created_by` (→ users, SET NULL), `created_at`, `updated_at` | | |
+| Q1 | Intake status is `data_verified`, never `verified`; Stage 1B "Verify & Mark Ready for Payment" remains the separate `draft → unpaid` | `review_status` CHECK; UI label "Mark data verified"; spec §11 renamed |
+| Q2 | Keep `finance_integration_identities`; identity must remain `data_entry`, never `finance_staff`; kill switch; approved entities; Owner + AAL2 administration | table + `enforce_finance_integration_identity()` + `fii_owner_write` policy; insert policy additionally requires the caller to *currently* be `data_entry` (promotion fails closed — tested) |
+| Q3 | Keep the two `SECURITY DEFINER` helpers, `search_path = ''`, narrow and read-only | `current_user_can_review_unresolved_intakes()`, `intake_is_superseded(text)` (the latter narrowed to finance roles during review) |
+| Q4 | D11-literal central visibility of unresolved intakes: Owner, Finance Manager, Finance Staff only | `fis_select` branch `entity_id IS NULL`; tested for 12 roles/identities |
+| Q5 | **Modified:** no universal DB gate; Stage 1B trigger/policy untouched; the gate for FinanceOps-originated bills is **application-only** | nothing in the SQL; see §7 for the required application behaviour |
+| Q6 | Entity resolution needs no AAL2 | `fis_update_resolve_entity` has no AAL2 term; tested with Finance Manager at `aal1` |
+| Q7 | Reject an invalid unresolved intake without an entity | `fis_update_resolve_entity` WITH CHECK allows `entity_id IS NULL`; trigger allows `rejected`; tested |
+| Q8 | Supported deletion of a linked draft bill/document clears only the link; intake and lineage preserved | `ON DELETE SET NULL` + cascade branch in the row trigger; audit `…_link_cleared`; tested (see note) |
+| Q9 | Intakes not API-deletable; no service-role cleanup path; lineage retained | no DELETE grant/policy; tested for Owner, Finance Manager, FinanceOps, anon |
 
-Trigger `fii_enforce_rules` (BEFORE INSERT/UPDATE, INVOKER): profile must be **active and role `data_entry`** (never `finance_staff` or anything else); entity list validated; `updated_at`.
-RLS: `fii_select` (self or Owner); `fii_owner_write` ALL — **Owner + AAL2** only (mirrors `user_entity_access_owner_all`). Grants: authenticated only (anon/public revoked).
+**Q8 note (found during validation).** After 0022 there is **no user-level path to delete a draft Supplier Bill** (policy `supplier_bills_draft_delete` dropped, `DELETE` revoked, no bill RPC). The supported *document* deletion RPC `delete_document_metadata` does exist and is tested; bill-link clearing is tested via administrative deletion, which is the only way it can occur today (or via a future bill-delete control).
 
-### 3.2 `public.finance_intake_submissions`
-| Group | Columns |
-|---|---|
-| Identity / idempotency | `id` uuid PK; `intake_id` text **UNIQUE** (`^[A-Za-z0-9_-]{8,64}$`); `payload_hash` (64 hex) |
-| Provenance | `integration_key_id`, `request_id`, `source` jsonb (Telegram refs), `payload` jsonb (validated metadata ≤ 64 KB) |
-| Entity (D4/D10) | `entity_code_declared` (IEA/IETA/PLC/KALER or NULL); **`entity_id` NULLABLE → `entities`** (NULL = unresolved) |
-| Records created | `supplier_bill_id` → `supplier_bills` SET NULL; `document_id` → `documents` SET NULL |
-| Original document facts | `document_sha256`, `document_mime_type` (pdf/jpeg/png), `document_filename`, `document_size_bytes` (1 … 4 194 304) |
-| Review record | `flags` text[] (≤ 64), `duplicate_matches` jsonb array, `process_state`, `review_status`, `review_note`, `reviewed_by`, `reviewed_at` |
-| Entity resolution (D10 path 1) | `entity_resolved_by`, `entity_resolved_at`, `entity_resolution_note` |
-| Lineage (D10 path 2) | `supersedes_intake_id` text → `finance_intake_submissions(intake_id)` ON DELETE RESTRICT |
-| Audit | `created_by` (→ users SET NULL), `created_at`, `updated_at` |
+## 2. Added invariant: `data_verified` ⇒ `process_state = 'complete'`
 
-States — `process_state`: `received`, `awaiting_entity`, `bill_created`, `document_attached`, `complete` (forward-only). `review_status`: `pending_review`, `data_verified`, `rejected`, `duplicate_suspected`, `needs_attention` ("superseded" is **derived**, not stored).
+Declarative CHECK `fis_data_verified_needs_complete` (`review_status <> 'data_verified' OR process_state = 'complete'`), kept alongside `fis_data_verified_needs_review` (entity set + `reviewed_at`). The row trigger still requires, as defence in depth: entity resolved, linked draft bill, linked original document (same entity, matching SHA-256), `process_state = 'complete'`, and sets `reviewed_by`/`reviewed_at` server-side. Proven independently of the trigger: a test disables the trigger inside a rolled-back transaction and shows the CHECK alone rejects the update; the mutation that removes the CHECK fails the suite.
 
-**Constraints beyond formats/enums:**
-- `fis_no_records_without_entity`: `entity_id IS NOT NULL OR (supplier_bill_id IS NULL AND document_id IS NULL)` — **no bill and no file until exactly one authorised entity is resolved.**
-- `fis_awaiting_entity_state`: `(entity_id IS NULL) = (process_state = 'awaiting_entity')`.
-- `fis_data_verified_needs_review`: `data_verified` ⇒ `reviewed_at` and `entity_id` set.
-- `fis_resolution_note_pair` / `_length`: resolution timestamp and note set together; note ≥ 3 chars.
-- `fis_no_self_supersede`; `fis_supersede_has_entity`: a superseding intake carries its entity and was never reviewer-resolved.
+## 3. Registry trigger vs `app_profiles` RLS (checked against Stage 1B policies, not assumed)
 
-**Indexes:** unique `intake_id` (constraint); unique partial on `supersedes_intake_id` (**one successor per original**), `supplier_bill_id`, `document_id`; `(created_at) WHERE entity_id IS NULL` (unresolved queue); `(entity_id, review_status, created_at DESC)`; `document_sha256`; `created_by`.
+`app_profiles_private_read` (0022): `current_user_has_eligible_role() AND (id = auth.uid() OR current_user_is_owner())`. The Owner can therefore read the designated user's profile, so the **SECURITY INVOKER** trigger `enforce_finance_integration_identity()` reliably validates "active, role = `data_entry`" when an Owner + AAL2 administrator writes the registry — the only writer the registry policy permits. `postgres`/`service_role` bypass RLS. Verified by tests (the Owner sees the target profile; a Finance Manager cannot). A non-owner writer is stopped by the policy, but the BEFORE trigger fires first and reports "must be an active data_entry user" rather than an RLS message — cosmetic only. **No change to `SECURITY DEFINER` is required.**
 
-### 3.3 Functions
-| Function | Kind | Purpose |
+## 4. Exact proposed objects (all new; nothing existing is altered)
+
+**Tables**
+- `public.finance_integration_identities`: `user_id` PK → `auth.users` (CASCADE); `integration` (= `'financeops'`); `active_status`; `allowed_entity_ids uuid[]` (1–4; trigger: only IEA/IETA/PLC/KALER, no duplicates); `note`, `created_by`, `created_at`, `updated_at`.
+- `public.finance_intake_submissions`: `id` PK; `intake_id` text UNIQUE (`^[A-Za-z0-9_-]{8,64}$`); `payload_hash`; `integration_key_id`, `request_id`; `source`, `payload` jsonb (≤ 64 KB); `entity_code_declared`; **`entity_id` NULLABLE**; `supplier_bill_id`, `document_id` (SET NULL); `document_sha256`, `document_mime_type` (pdf/jpeg/png), `document_filename`, `document_size_bytes` (1…4 194 304); `flags text[]`, `duplicate_matches jsonb`; `process_state` (`received`, `awaiting_entity`, `bill_created`, `document_attached`, `complete`); `review_status` (`pending_review`, `data_verified`, `rejected`, `duplicate_suspected`, `needs_attention`); `review_note`, `reviewed_by`, `reviewed_at`; `entity_resolved_by`, `entity_resolved_at`, `entity_resolution_note`; **`supersedes_intake_id`** (text, self-FK to `intake_id`, ON DELETE RESTRICT); `created_by`, `created_at`, `updated_at`.
+
+**Constraints:** formats/enums as above; `fis_no_records_without_entity` (no bill/file while entity NULL); `fis_awaiting_entity_state` (`entity_id IS NULL` ⇔ `awaiting_entity`); `fis_data_verified_needs_review`; **`fis_data_verified_needs_complete`**; `fis_resolution_note_pair` / `_length`; `fis_no_self_supersede`; `fis_supersede_has_entity`.
+**Indexes:** unique `intake_id`; unique partial `supersedes_intake_id` (**one successor**), `supplier_bill_id`, `document_id`; `(created_at) WHERE entity_id IS NULL`; `(entity_id, review_status, created_at DESC)`; `document_sha256`; `created_by`.
+
+**Functions** — `app_private.current_user_can_review_unresolved_intakes()` (STABLE, DEFINER), `app_private.intake_is_superseded(text)` (VOLATILE, DEFINER, finance roles only), and three SECURITY INVOKER trigger functions: `public.enforce_finance_intake_rules()`, `public.audit_finance_intake_change()`, `public.enforce_finance_integration_identity()` (revoked from public/anon/authenticated).
+**Triggers** — `fii_enforce_rules`, `fis_enforce_rules` (BEFORE INSERT/UPDATE), `fis_audit_changes` (AFTER INSERT/UPDATE).
+**RLS** — enabled on both tables. Policies: `fii_select`, `fii_owner_write` (Owner + AAL2); `fis_select`, `fis_insert_integration`, `fis_update_integration`, `fis_update_review`, `fis_update_resolve_entity`. Grants: `SELECT, INSERT, UPDATE` on intakes (**no DELETE**); anon revoked everywhere. All policy `auth.uid()` calls are wrapped as `(select auth.uid())`.
+**View** — `public.finance_intake_queue` (`security_invoker`, `security_barrier`; adds `is_unresolved`, `is_superseded`).
+**Audit (database-enforced, INVOKER, fail-closed)** — `financeops_intake_received`, `…_superseded`, `…_superseded_by`, `…_entity_resolved`, `…_<review_status>`, `…_linked_bill`, `…_linked_document`, `…_bill_link_cleared`, `…_document_link_cleared`.
+
+Row-trigger behaviour is unchanged from v1 of this package except for the review changes listed in §5; see the SQL comments for each rule.
+
+## 5. What the static review and validation changed (all re-validated)
+
+| # | Finding | Resolution |
 |---|---|---|
-| `app_private.current_user_can_review_unresolved_intakes()` | STABLE, **SECURITY DEFINER**, `search_path=''` | D11: active app user with role `owner` / `finance_manager` / `finance_staff`. Not `data_entry`, not `management`. |
-| `app_private.intake_is_superseded(text)` | VOLATILE, **SECURITY DEFINER**, `search_path=''` | Boolean existence of a successor so a reviewer can't miss a successor hidden by entity scope; VOLATILE for a fresh snapshot in the resolve-vs-supersede race. |
-| `public.enforce_finance_intake_rules()` | trigger, INVOKER | The state machine (below). |
-| `public.audit_finance_intake_change()` | trigger, INVOKER | DB-enforced audit rows. |
-| `public.enforce_finance_integration_identity()` | trigger, INVOKER | Registry validation. |
+| 1 | `ON DELETE SET NULL` cascades (document/bill/auth-user deletion) would trip the "set once"/immutability rules, and `auth.uid()` is NULL for admin-driven cascades | Row trigger detects the nested referential update (`pg_trigger_depth() > 1`) and allows only NULLing five reference columns, changing nothing else. Mutation without it breaks the suite (abort). |
+| 2 | A second registered FinanceOps identity could review the first one's intakes through the human path | Human-review branch refuses any registry identity |
+| 3 | A *rejected* unresolved intake could still be *resolved* (frozen-state check ran after the resolution branch) | Terminal-state freeze moved first |
+| 4 | A deactivated FinanceOps identity fell through to the human path and could keep advancing its rows | Kill-switch freeze rule |
+| 5 | `intake_is_superseded` was callable by every app role (existence oracle) | Restricted to finance roles; tested (trainer gets FALSE) |
+| 6 | Reviewers could not reject unresolved junk without assigning an entity | Q7 path added |
+| 7 | `data_verified` could coexist with `bill_created`/`document_attached` | New CHECK + trigger rule (§2) |
+| 8 | `auth_rls_initplan` advisor warnings on four new policies | `(select auth.uid())` |
+| 9 | **Validation:** documents RLS exposes a document only through a `document_links` row, and the trigger reads the document as the caller | Application ordering requirement (§7) |
+| 10 | **Validation:** BEFORE triggers fire before RLS `WITH CHECK`, so some denials carry trigger messages | Cosmetic; tests accept either denial source |
+| 11 | Resolution to an inaccessible entity reported "approved entities" (RLS hides the entity row) | Message clarified |
+| 12 | **Validation:** no user-level draft-bill delete exists after 0022 | Q8 note (§1) |
 
-Both definer functions: `revoke … from public, anon`; `grant execute … to authenticated, service_role` (same pattern as the Stage 1B helpers). The three trigger functions are revoked from public/anon/authenticated like 0022's.
+## 6. Disposable validation (summary; full evidence in `VALIDATION_EVIDENCE.md`)
 
-### 3.4 `enforce_finance_intake_rules()` — what it enforces
-- **INSERT:** only a registry identity; `created_by = auth.uid()`; no review/resolution/links on a new row; entity (if given) is one of the four and equals `entity_code_declared`; unresolved ⇒ no declared code and `awaiting_entity`; **supersession**: locks the original (`FOR UPDATE`), requires original still unresolved, same creating identity, not rejected (second successor ⇒ unique-index error).
-- **UPDATE, always:** provenance, payload, hash, source, original-document facts, `supersedes_intake_id`, `created_by` are immutable; `updated_at` set by the server; terminal `data_verified`/`rejected` rows frozen.
-- **Entity resolution (path 1), standalone & set-once:** only `current_user_can_review_unresolved_intakes()` (never the integration identity); refuses if a successor exists; entity must be one of the four; note required; trigger **overwrites** `entity_resolved_by := auth.uid()`, `entity_resolved_at := now()`, state → `received`; nothing else may change in the same statement. Afterwards the entity and its trail are immutable.
-- **Links:** bill/document link set once; bill must be in the **same entity** and still **`draft`**; document must be the **same entity** and its `file_hash` must equal the intake's `document_sha256` (proves it is the original file).
-- **FinanceOps identity (own rows only):** may advance `process_state`, set the two links, and flag `duplicate_suspected`/`needs_attention` from `pending_review`. Nothing else — never review fields, never entity, never `data_verified`/`rejected`.
-- **Human review:** a FinanceOps identity is refused here outright; flags/duplicates immutable; allowed transitions only (`pending_review → data_verified|rejected|needs_attention|duplicate_suspected`, `needs_attention → pending_review|data_verified|rejected`, `duplicate_suspected → pending_review|rejected`); `data_verified`/`rejected` **four-eyes** (`created_by ≠ auth.uid()`) with `reviewed_by/at` server-set; `data_verified` requires linked bill **and** original document.
-- **Referential SET NULL cascades** (draft bill/document/auth user deleted): detected by `pg_trigger_depth() > 1`; may only null the link/actor columns and change nothing else (so Stage 1B draft/document deletion and user deletion are **not** blocked by this table).
-
-### 3.5 Audit (DB-enforced, INVOKER, fail-closed)
-`financeops_intake_received` (+ `…_superseded` on the new row and `…_superseded_by` on the original), `…_entity_resolved` (before/after), `…_<review_status>` for each review transition, `…_linked_bill` / `…_linked_document` and `…_bill_link_cleared` / `…_document_link_cleared`. `entity_type = 'finance_intake'`, `entity_id` = the intake's entity (NULL while unresolved), `is_demo = false`, `data_origin = 'imported'` for integration events and `'manual'` for human ones. *Note:* audit rows for an unresolved intake have `entity_id NULL`, so under the existing `audit_logs_private_select` only the Owner and the actor can read them.
-
-### 3.6 RLS and grants
-`finance_intake_submissions`: RLS on; `REVOKE ALL` from public/anon/authenticated, then `GRANT SELECT, INSERT, UPDATE` to authenticated — **no DELETE grant** (lineage is never deleted through the API; `service_role` keeps its default privileges and is never given to FinanceOps).
-
-| Policy | Rule |
+| Check | Result |
 |---|---|
-| `fis_select` | active app user AND (creator **or** `entity_id IS NULL` & reviewer set **or** `entity_id IS NOT NULL` & `user_can_access_entity` & `can_view_finance`) |
-| `fis_insert_integration` | `created_by = auth.uid()` AND `current_user_is_data_entry()` AND active registry row AND (`entity_id IS NULL` OR in `allowed_entity_ids`) AND `user_can_access_entity` AND status in (`pending_review`,`duplicate_suspected`). Promoting the identity to `finance_staff` makes this fail closed. |
-| `fis_update_integration` | own rows, data_entry, active registry, allowed entities (column limits by trigger) |
-| `fis_update_review` | resolved rows: `user_can_access_entity` AND `can_manage_bills` (this is how the **intern** data-verifies, D2) |
-| `fis_update_resolve_entity` | unresolved rows: reviewer set; new entity must be accessible to the reviewer (Owner: all); also lets the set reject a junk unresolved intake |
+| Replay 0001–0018, 0020, 0021, 0022 (CLI `db reset`), 0019 absent, 0022 content hash matches the approved LF hash | PASS |
+| Migration A applied (fresh, no migration number) | PASS, no errors |
+| Catalogue snapshot diff (policies, function bodies/ACLs, triggers, columns, constraints, grants, views, RLS flags, indexes) | **0 existing objects changed or removed**; 138 added, all Migration A |
+| Migration A pgTAP (registry, insert/idempotency, visibility, resolution, supersession, links, review, kill switch, cascades, audit incl. fail-closed, no-delete, Stage 1B guard rails incl. forged `aal2`, structure) | **240 / 240 PASS** |
+| Stage 1B suites with Migration A applied: 0021 / 0022 / S01–S16 matrix / Stage 1A regression | **34/34, 70/70, 16/16, 16/16 PASS** |
+| 0020 suite | 66/66 at its own baseline point; fails 8 tests after 0022 *by design*, identically before and after A |
+| Two-session race checks | resolve-vs-supersede: **exactly one wins in both orders** (loser: `intake_already_resolved`); two successors: unique index; concurrent identical insert: one row, one audit event |
+| Mutation checks (12 deliberate defects: CHECK removed, terminal freeze, second-identity review, kill switch, unresolved visibility widened, supersede helper stubbed, non-draft link, audit trigger, entity set-once, cascade allowance, DELETE granted, registry any-role) | **12 / 12 caught** |
+| `supabase db lint --local --fail-on error` | PASS |
+| Supabase advisors (security + performance) | Migration A adds **9** findings: 7 INFO (FK/unused index on an empty DB) and 2 WARN `multiple_permissive_policies` (inherent to the three UPDATE paths); **0 ERROR, 0 security-class, 0 `auth_rls_initplan`**; the 3 pre-existing `function_search_path_mutable` warnings are unchanged |
 
-`finance_intake_queue` view (`security_invoker`, `security_barrier`): all columns + `is_unresolved` + `is_superseded`.
+## 7. Q5 application follow-up (required when the Review UI/API is built — NOT implemented now)
 
-## 4. Who can do what (resulting matrix)
-| Action | FinanceOps (data_entry + registry) | Intern (data_entry) | Finance Staff | Finance Manager / Owner |
-|---|---|---|---|---|
-| Create an intake | **yes** (allowed entities only) | no | no | no |
-| Read own submissions (status/replay) | yes | – | – | – |
-| See an **unresolved** intake | own only | **no** | yes | yes |
-| Resolve an unresolved entity | **no** | **no** | yes (entities they can access) | yes (Owner: all) |
-| Reject an unresolved intake | no | no | yes | yes |
-| `data_verified` / `rejected` on a resolved intake | **no** (four-eyes + refused) | yes | yes | yes |
-| Delete an intake | no | no | no | no |
-| `draft → unpaid` of the bill | **no** (Stage 1B trigger) | no | yes (`/api/bills/verify`) | yes |
-| Create `bill_payments`, vouchers, bank, reconciliation | no | no | per Stage 1B | per Stage 1B + AAL2 |
+- **`/api/bills/verify` or its caller must detect whether the draft Supplier Bill is linked to a FinanceOps intake** (`finance_intake_submissions.supplier_bill_id = <bill id>`).
+  - **Linked:** require `review_status = 'data_verified'` before the application permits `draft → unpaid` ("Verify & Mark Ready for Payment"). Otherwise refuse with a clear message.
+  - **Not linked:** preserve the normal Stage 1B manual-bill behaviour unchanged.
+- Do **not** implement this in Migration A or by altering the Supplier Bill policy/trigger.
+- `data_verified` itself never changes `supplier_bills.payment_status`.
+- Accepted limit of an application-level gate: a Finance Staff-or-higher user acting directly against the database (not through the app) can still release such a bill. The audit trail shows the intake; reviewers are trusted finance roles.
+- Required flow: FinanceOps intake → entity resolved if required → draft bill → original document attached → human data review → `data_verified` → Finance Staff / Finance Manager / Owner → `draft → unpaid` → normal PV/payment workflow.
 
-## 5. D1–D11 traceability
-D1 data_entry identity, no new role, no service role → registry + policy `current_user_is_data_entry()`; D2 intern verifies data, not payment → `data_verified` only, no effect on bill status; D3 untouched (no evidence tables); D4 four entities → CHECKs + registry trigger; D5 due-date placeholder → app/flags (no schema change to `due_date`); D6 exact-file duplicate → app logic + `duplicate_suspected`, `document_sha256` index; D7 4 MB → CHECK 4 194 304; D8 released main base; D9 HMAC unchanged; D10 both paths → resolution columns + `supersedes_intake_id` + unique/locking/triggers; D11 reviewer set → helper function and policies.
+Other application requirements: persistence order = insert intake → create draft bill (`payment_status='draft'`, `created_by` = the identity) → upload file + `documents` + **`document_links` to the same-entity bill** → update the intake links (the row trigger reads the document as the caller) → `complete`; add `supersedes_intake_id` to the request schema only once persistence validates it; replace the generic entity checkbox with a Finance Staff-or-higher "Resolve entity" action; keep "Mark data verified" visibly separate from "Verify & Mark Ready for Payment".
 
-## 6. Corrections to earlier documents (made with this package)
-1. **Integration identity UPDATE.** Earlier text said it "has no UPDATE right on intake rows". Insert-first idempotency needs it to advance *its own mechanical columns* (state, links, duplicate/attention flag). It now has exactly that, enforced by the trigger; it can never touch review, entity, lineage or other rows.
-2. **`verified` → `data_verified`** for the intake-level state (Q1).
-3. **`supersedes_intake_id` is text** referencing `intake_id` (API-aligned lineage), not a row uuid.
-4. PR-0 items in the spec's headline findings are now **delivered on main**.
+## 8. Remaining risks and open decisions
 
-## 7. Security-sensitive items for explicit review
-1. **Two new `SECURITY DEFINER` functions** (read-only booleans, `search_path=''`, role/EXISTS only). Alternative for the first: an inline role subquery in the policies (`app_profiles_private_read` lets a user read their own role) — saves one definer function, duplicates logic. The second cannot be inlined without the visibility gap in §3.3.
-2. **Registry table** (Q2) — adds the DB-level designation and entity allow-list; without it any `can_manage_bills` user could insert forged "FinanceOps" intakes.
-3. **Central visibility of unresolved intakes** (D11 literal): any Owner/Finance Manager/Finance Staff sees every unresolved intake regardless of their entity access (Q4).
-4. **`pg_trigger_depth() > 1` cascade allowance** — can only null five reference columns; reachable only by a trigger-nested UPDATE, and no other trigger updates this table.
-5. **No DELETE grant / no delete trigger:** `service_role`/admin could still delete; operational cleanup procedure needed (Q9).
-6. **Not a hard boundary:** the in-memory rate limiter. HMAC (canonical five-line signature, unchanged) remains the integration boundary; the DB layer above is the second line.
-7. **Stage 1B untouched:** no existing policy, trigger, function or table is modified; Migration A can be dropped without affecting Stage 1B (rollback §10).
+**No Q1–Q9 decision remains open.** Remaining risks (none blocks numbering):
+1. **Central unresolved visibility (Q4, accepted):** any Owner/Finance Manager/Finance Staff sees every unresolved intake regardless of entity access.
+2. **Q5 gate is application-level (decision):** see §7.
+3. **`data_entry` identity is still broader than ideal (D1, transitional):** Migration A constrains *intake rows*, not what the same identity may do to `supplier_bills` under Stage 1B RLS (it can create/maintain draft bills in its entities). Controls: Hub exposes only narrow operations; never `draft → unpaid`; no payments/vouchers/bank/reconciliation (all re-verified, including with a forged `aal2` claim).
+4. **Cascade allowance** (`pg_trigger_depth() > 1`) is reachable only by a trigger-nested UPDATE; nothing else updates this table; limited to nulling five reference columns.
+5. **Performance advisors accepted for Phase 1:** two `multiple_permissive_policies` WARNs and a few unindexed-FK INFOs (low volume). Option later: merge the three UPDATE policies or add FK indexes.
+6. **Personal data in audit payloads** (Telegram chat/message ids) — same sensitivity class as existing finance audit rows.
+7. **Not run:** Production-volume/performance testing; hosted-Supabase version differences (the lab uses the local Postgres 17.6 image; the preflight requires ≥ 15 — confirm the hosted version at approval time); `service_role` bypasses everything and must never reach Hermes.
+8. The in-memory rate limiter is **not** a hard boundary; the five-line canonical HMAC remains the integration boundary, unchanged.
 
-## 8. Open decisions for Claire
-- **Q1** Intake-level state name: `data_verified` (recommended) vs reuse "verified".
-- **Q2** Approve the `finance_integration_identities` registry table (recommended) — or fall back to the spec's original "any `can_manage_bills` user may insert" (weaker).
-- **Q3** Approve the two `SECURITY DEFINER` helpers (recommended) or the inline alternative for the first.
-- **Q4** Unresolved-intake visibility: D11 literal (recommended; approved) vs tighter "reviewer must have access to at least one entity in the integration's allowed list".
-- **Q5** Release gate: keep `draft → unpaid` independent of `data_verified` (recommended — Finance Staff+ remains the authoritative checker; Stage 1B trigger untouched) vs a DB/app gate requiring `data_verified` first for intake-originated bills.
-- **Q6** Entity resolution needs **no** AAL2 (recommended; not a listed high-risk operation) — confirm.
-- **Q7** Reviewers may reject a junk unresolved intake without resolving it (included) — confirm.
-- **Q8** Deleting a draft bill/document linked to an intake leaves the intake with a cleared link (lineage kept) — confirm.
-- **Q9** Retention: intakes are never API-deletable; who may clean up via service role, and when?
+**Decisions needed only to proceed:** (a) approve numbering Migration A (next free number after 0022) and moving the SQL to `supabase/migrations/` and the pgTAP file to `supabase/tests/`; (b) confirm the application follow-ups in §7 are the next work item.
 
-## 9. Test plan (pgTAP, disposable local stack only — after approval)
-*Registry:* non-Owner cannot write; Owner without AAL2 cannot; cannot designate a non-`data_entry` or inactive user; cannot include a non-approved or unknown entity; promoting the identity to `finance_staff` makes its insert fail.
-*Insert/idempotency:* non-registry `data_entry` cannot insert; identity can insert for allowed entity and for NULL entity; not for a disallowed entity; `created_by` mismatch rejected; duplicate `intake_id` conflicts; row cannot carry review/resolution/links; unresolved row with a declared code rejected; resolved row with mismatching code rejected.
-*Unresolved visibility:* intern cannot select or update; `management`/`read_only` cannot; Finance Staff/Manager/Owner can; creator can read own; resolved rows visible to intern with entity access and not to others.
-*Resolution:* intern cannot resolve; integration cannot resolve; Finance Staff can only to an accessible approved entity; note required; set-once; bill/document/review cannot change in the same statement; resolution after supersession rejected.
-*Supersession:* new intake with `supersedes_intake_id` needs entity; second successor rejected; successor of a resolved original rejected; of a rejected original rejected; by a different identity rejected; original and audit rows preserved; concurrent resolve-vs-supersede (two sessions) — exactly one wins.
-*Review:* creator/identity cannot `data_verified`/`rejected`; second identity cannot either; intern can on resolved rows; requires linked bill + original document; transitions table; terminal states frozen; flags/duplicates immutable to humans.
-*Links:* bill in another entity rejected; non-draft bill rejected; document with different hash/entity rejected; set-once.
-*Cascades:* deleting a linked draft bill (Owner/FM + AAL2) and a linked document (`delete_document_metadata`) succeeds and clears the link; deleting an auth user clears actor columns; nothing else changes.
-*Audit:* every action above writes the expected `audit_logs` row; a failed audit insert aborts the change.
-*Stage 1B regression:* existing Stage 1B pgTAP suites still pass; the FinanceOps identity still cannot `draft → unpaid`, insert `bill_payments`, or reach vouchers/bank/reconciliation.
+## 9. How to reproduce (local only; no hosted project, no `--linked`, no `db push`)
+1. Disposable folder with `supabase init`, ports offset, studio/realtime/edge-runtime/analytics/mail disabled; copy 0001–0018, 0020 into `supabase/migrations/`, `supabase start`; run `supabase test db --local` on the 0020 suite; add 0021, `supabase migration up --local`, run its suite; add 0022 likewise (run the 0022 suite **before** loading Stage 1B fixtures — it is count-sensitive).
+2. Snapshot the catalogue, apply the proposed SQL with `psql` (no migration number), snapshot again and diff.
+3. Run `tests/migration_a_financeops_intake.test.sql` with `supabase test db --local`; then `tests/race_setup.sql` and `tests/race_checks.sh` (set `DBC` to the disposable db container).
+4. Run `supabase db advisors --local` and `supabase db lint --local` before and after.
+5. `supabase stop --no-backup`, delete the disposable folder.
 
-## 10. Rollout and rollback (when approved — not now)
-Order: (1) replay 0001–0018, 0020–0022 in a disposable local Supabase stack and apply Migration A; (2) pgTAP above + Stage 1B suites + Supabase advisors; (3) review outcomes with Claire; (4) only then a separately approved Production window (no `db push` before that). Manual rollback (disposable/pre-use): drop view `finance_intake_queue`; drop triggers `fis_audit_changes`, `fis_enforce_rules`, `fii_enforce_rules`; drop the five functions; drop tables `finance_intake_submissions` then `finance_integration_identities`. No existing object depends on them.
-
-## 11. Application follow-ups (not SQL; start only after Migration A is approved/validated)
-1. `schema.ts`: add `supersedes_intake_id` to the top-level allowlist **only now that persistence validates it**.
-2. Handler persistence (insert-first): sign in as the registry identity (RLS applies, `created_by` = its id) → `INSERT … ON CONFLICT (intake_id) DO NOTHING` → on conflict read own row: same `payload_hash` ⇒ idempotent replay/resume by `process_state`, different ⇒ `409 intake_conflict` (never silently reuse an `intake_id` for another entity) → NULL entity ⇒ stop with `needs_entity` (no bill, no file) → exact-file duplicate check ⇒ flag `duplicate_suspected`, `409` → create **draft** bill (`payment_status='draft'`, `created_by`) → link → upload file + `documents` + `document_links` → link → `complete`. Status endpoint reads only its own row.
-3. Review UI: **replace the generic entity checkbox** with a "Resolve entity" action visible only to the three reviewer roles (reuse `BILL_VERIFIER_ROLES`); keep "Data verified" visibly separate from the Stage 1B "Verify & Mark Ready for Payment"; intern sees only resolved intakes; an intake-originated draft shows its intake status.
-4. Provisioning (separately approved, Production window): create the FinanceOps Auth user (`data_entry`), `user_entity_access` rows for the four entities, one registry row. Never `finance_staff`; never a service-role key to Hermes.
-
-## 12. Confirmation
-No Production database, Vercel Production, migration ledger or SQL Account was touched. No migration file exists in `supabase/migrations/` for this work. No `db push`, deployment or Auth-user provisioning occurred.
+## 10. Confirmation
+No Production database, Vercel Production, migration ledger, Supabase hosted project, Auth user provisioning or SQL Account was touched. No file exists in `supabase/migrations/` for this work. No `db push`, deployment or merge occurred.
