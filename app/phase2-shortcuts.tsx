@@ -15,6 +15,8 @@ const navGroups = [
       { label: "Payment Vouchers", href: "/payment-vouchers", icon: "PV" },
       { label: "Bills", href: "/bills", icon: "B" },
       { label: "FinanceOps Intake", href: "/finance-intakes", icon: "FO" },
+      { label: "Finance Operations", href: "/finance-ops", icon: "$" },
+      { label: "Payment Register", href: "/finance-ops/payments", icon: "PR" },
       { label: "Suppliers", href: "/suppliers", icon: "S" },
       { label: "Import Suppliers", href: "/suppliers/import", icon: "↑" },
       { label: "Recurring", href: "/recurring", icon: "R" },

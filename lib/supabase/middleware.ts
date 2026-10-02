@@ -47,6 +47,11 @@ function requiresAal2(pathname: string) {
     || pathname.startsWith("/api/bank-imports/")
     || pathname.startsWith("/api/bank-reports/")
     || pathname.startsWith("/api/reconciliation/")
+    // Finance Operations: bank statement import and payment <-> bank matching are bank data (AAL2, like the pages above)
+    || pathname.startsWith("/api/finance-ops/bank-import")
+    || pathname.startsWith("/api/finance-ops/matching")
+    || pathname.startsWith("/finance-ops/bank-import")
+    || pathname.startsWith("/finance-ops/matching")
     || /^\/api\/documents\/[^/]+\/delete$/.test(pathname)
     || pathname === "/bank-transactions"
     || pathname.startsWith("/bank-imports")
