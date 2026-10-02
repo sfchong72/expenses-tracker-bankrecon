@@ -118,6 +118,24 @@ describe("bank statement import (Public Bank listing, no balance needed)", () =>
     assert.deepEqual(out.map((r) => [r.direction, r.amount]), [["debit", 100], ["credit", 200], ["debit", 30]]);
   });
 
+  it("the CIMB/PBB sheet layout (Tran Amt + numeric 1/2 code, wrapped descriptions, Excel-mangled reference) imports without manual mapping", () => {
+    const text = [
+      "Tran Date\tTran Time\tTran Desc.\tDoc Ref No\tAdditional Desc\tTran Amt\tTran Type",
+      `2/8/2026\t16:47:52\tDUITNOW TO ACCOUNT\t82676\t="""Sanny 2nd Course Fees""""\t3,000.00\t2`,
+      `5/8/2026\t20:30:30\tDUITNOW TO ACCOUNT\t2.03E+17\t="""Laurel Residence""""\t2,782.85\t1`,
+      `5/8/2026\t20:30:30\tOTHER TRANSFER FEE\t43506559\t="""allowances""""\t0.10\t1`,
+    ].join("\n");
+    const s = parsePastedStatement(text)[0];
+    const mapping = inferStatementMapping(Object.keys(s.rows[0]));
+    assert.deepEqual(Object.values(mapping), ["transaction_date", "transaction_time", "description", "reference", "other_details", "amount", "direction"]);
+    const out = mapStatementRows(s.rows, mapping, { companyAccountRef: "A" });
+    assert.deepEqual(out.map((r) => [r.direction, r.amount, r.state, r.kind]), [["credit", 3000, "new", "credit"], ["debit", 2782.85, "new", "payment_candidate"], ["debit", 0.1, "new", "bank_fee"]]);
+    assert.equal(out[0].transactionDate, "2026-08-02");
+    assert.match(out[0].description ?? "", /Sanny 2nd Course Fees$/);
+    assert.equal(out[1].bankReference, null);
+    assert.match(out[1].warnings.join(), /shortened by Excel/);
+  });
+
   it("rows pasted from the bank's web page (tab separated) import like a file", () => {
     const text = ["Posting Date\tRemark\tDebit Amount\tCredit Amount\tReference No.", "02-Oct-2026 23:13\tSania Arshad\t321.00\t\t49883140"].join("\n");
     const s = parsePastedStatement(text)[0];

@@ -22,6 +22,8 @@ export type StatementSheet = { name: string; rows: Record<string, string>[] };
 const key = (h: string): string => h.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
 const SYNONYMS: Record<string, StatementField> = {
+  tran_date: "transaction_date", tran_time: "transaction_time", tran_desc: "description", tran_description: "description", doc_ref_no: "reference", doc_ref: "reference", additional_desc: "other_details",
+  tran_amt: "amount", tran_amount: "amount", tran_type: "direction", tran_code: "direction", dc_code: "direction",
   posting_date: "transaction_date", transaction_date: "transaction_date", date: "transaction_date", txn_date: "transaction_date", trn_date: "transaction_date", post_date: "transaction_date", posted_date: "transaction_date",
   time: "transaction_time", transaction_time: "transaction_time",
   debit_amount: "debit", debit: "debit", withdrawal: "debit", withdrawals: "debit", withdrawal_amount: "debit", money_out: "debit", dr: "debit",
@@ -72,7 +74,8 @@ export function sha256Hex(bytes: Buffer | string): string {
 }
 
 const clean = (v: string | undefined): string | null => {
-  const t = (v ?? "").replace(/\s+/g, " ").trim();
+  // spreadsheet exports sometimes wrap text as ="""text""": drop the wrapper
+  const t = (v ?? "").replace(/\s+/g, " ").trim().replace(/^=?"+/, "").replace(/"+$/, "").trim();
   return t ? t : null;
 };
 
@@ -107,8 +110,9 @@ export function mapStatementRows(rows: readonly Record<string, string>[], mappin
     else if (credit !== null && credit > 0) { direction = "credit"; amount = credit; }
     else if (amountText !== undefined && parseAmount(amountText) !== null) {
       const a = parseAmount(amountText) as number;
-      if (/^(dr|debit|d)\b/.test(directionText) || a < 0) { direction = "debit"; amount = Math.abs(a); }
-      else if (/^(cr|credit|c)\b/.test(directionText)) { direction = "credit"; amount = Math.abs(a); }
+      // some bank exports use a numeric code: 1 = money out (expense), 2 = money in (income)
+      if (/^(dr|debit|d|1)\b/.test(directionText) || a < 0) { direction = "debit"; amount = Math.abs(a); }
+      else if (/^(cr|credit|c|2)\b/.test(directionText)) { direction = "credit"; amount = Math.abs(a); }
       else errors.push("The amount has no debit/credit indicator");
     }
 
@@ -123,7 +127,11 @@ export function mapStatementRows(rows: readonly Record<string, string>[], mappin
     }
     const kind: ParsedBankRow["kind"] = errors.length ? "invalid" : direction ? classifyBankRow({ direction, description, amount: amount as number, payeeName: payee }) : "invalid";
     if (kind === "bank_fee") warnings.push("Bank fee: kept for the record, never matched to a payment");
-    const bankReference = clean(fieldValue(row, mapping, "reference"));
+    let bankReference = clean(fieldValue(row, mapping, "reference"));
+    if (bankReference && /^\d(\.\d+)?e\+?\d+$/i.test(bankReference)) {
+      warnings.push(`The bank reference "${bankReference}" was shortened by Excel and is ignored; export it as text to keep it`);
+      bankReference = null;
+    }
     return {
       rowNumber,
       transactionDate: parsedDate.date,

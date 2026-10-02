@@ -178,7 +178,7 @@ export function PaymentsView() {
             )}
           </section>
           {!rows.length ? <div className="empty">No payments match.</div> : (
-            <table>
+            <div style={{ overflowX: "auto" }}><table>
               <thead><tr><th>Date</th><th>Entity</th><th>Payee</th><th>Amount</th><th>Purpose</th><th>Type</th><th>Status</th><th>Documents</th><th /></tr></thead>
               <tbody>
                 {rows.map((p) => {
@@ -198,7 +198,7 @@ export function PaymentsView() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
           {selected && <PaymentDrawer key={selected.id} data={data} payment={selected} onClose={() => setSelectedId(null)} />}
         </>
@@ -213,10 +213,11 @@ export function PaymentDrawer({ data, payment: p, onClose }: { data: FinanceOpsD
   const { me, db } = data;
   const reviewer = isFinanceReviewer(me.role);
   const ds = data.documentState(p);
+  const [sql, setSql] = useState({ reference: p.sql_reference ?? "", date: p.sql_posting_date ?? todayIso(), note: p.sql_note ?? "", reconciled: p.reconciled_date ?? todayIso() });
   const confirmedMatch = data.matches.find((m) => m.payment_register_id === p.id && m.status === "confirmed");
   const hasConfirmedMatch = Boolean(confirmedMatch) || (["bank_matched", "finance_review", "ready_for_sql", "posted_to_sql", "reconciled"].includes(p.status) && !p.bank_match_not_applicable);
   const ctx = { role: me.role, actorUserId: me.id, createdByUserId: p.created_by, sourceType: p.source_type, status: p.status as PaymentStatus };
-  const moves = allowedMoves({ ...ctx, hasConfirmedMatch, bankMatchNotApplicable: p.bank_match_not_applicable, documentsSatisfied: ds.missing.length === 0 || Boolean(p.document_exception_approved_at), missingDocuments: ds.missing, hasSqlReference: Boolean(p.sql_reference), hasSqlPostingDate: Boolean(p.sql_posting_date), hasReconciledDate: Boolean(p.reconciled_date) });
+  const moves = allowedMoves({ ...ctx, hasConfirmedMatch, bankMatchNotApplicable: p.bank_match_not_applicable, documentsSatisfied: ds.missing.length === 0 || Boolean(p.document_exception_approved_at), missingDocuments: ds.missing, hasSqlReference: sql.reference.trim().length > 0, hasSqlPostingDate: Boolean(sql.date), hasReconciledDate: Boolean(sql.reconciled) });
   const editable = canEditDetails(ctx);
   const [notes, setNotes] = useState(p.notes ?? "");
   const [followup, setFollowup] = useState(p.followup_note ?? "");
@@ -224,7 +225,6 @@ export function PaymentDrawer({ data, payment: p, onClose }: { data: FinanceOpsD
   const [busy, setBusy] = useState(false);
   const [exception, setException] = useState(p.document_exception_note ?? "");
   const [naNote, setNaNote] = useState(p.bank_match_na_note ?? "");
-  const [sql, setSql] = useState({ reference: p.sql_reference ?? "", date: p.sql_posting_date ?? todayIso(), note: p.sql_note ?? "", reconciled: p.reconciled_date ?? todayIso() });
   const [billId, setBillId] = useState(p.supplier_bill_id ?? "");
   const [edit, setEdit] = useState({ beneficiary_name: p.beneficiary_name ?? "", beneficiary_account_no: p.beneficiary_account_no ?? "", beneficiary_bank: p.beneficiary_bank ?? "", amount: String(p.amount), purpose: p.purpose ?? "", bank_reference: p.bank_reference ?? "", pay_from_account_ref: p.pay_from_account_ref ?? "", account_code: p.account_code ?? "", payment_type: p.payment_type as PaymentType });
 

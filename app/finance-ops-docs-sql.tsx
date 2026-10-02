@@ -41,7 +41,7 @@ export function MissingDocumentsView() {
     if (!file) return;
     const chosen = rows.filter(({ p }) => selected.has(p.id)).map(({ p }) => p);
     if (chosen.length === 0) return data.setError("Tick the payments this file supports first.");
-    await act(`${DOC_ROLE_LABELS[bulkRole]} attached to ${chosen.length} payment(s); the document`, async () => {
+    await act(`${DOC_ROLE_LABELS[bulkRole]} for ${chosen.length} payment(s)`, async () => {
       const err = await attachFileToPayments(data, chosen, bulkRole, file);
       if (!err) for (const p of chosen) await syncEarlyStatus(data, p);
       return err;
@@ -65,7 +65,7 @@ export function MissingDocumentsView() {
             )}
           </section>
           {!rows.length ? <div className="empty">Nothing is missing.</div> : (
-            <table>
+            <div style={{ overflowX: "auto" }}><table>
               <thead><tr><th /><th>Entity</th><th>Date</th><th>Payee</th><th>Amount</th><th>Purpose</th><th>Bank match</th><th>Required</th><th>Have</th><th>Missing</th><th>Age</th><th>Follow-up</th><th>Actions</th></tr></thead>
               <tbody>
                 {rows.map(({ p, ds }) => (
@@ -88,7 +88,7 @@ export function MissingDocumentsView() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
           {openId && data.payments.find((p) => p.id === openId) && <PaymentDrawer key={openId} data={data} payment={data.payments.find((p) => p.id === openId)!} onClose={() => setOpenId(null)} />}
         </>
@@ -136,22 +136,22 @@ export function SqlQueueView() {
           {!list.length ? <div className="empty">{tab === "ready" ? "Nothing is ready for SQL." : tab === "posted" ? "Nothing is waiting for reconciliation." : "Nothing reconciled yet."}</div> : (
             <>
               <div className="record-actions"><button type="button" className="neutral" onClick={download}>Download posting package (CSV)</button></div>
-              <table>
-                <thead><tr><th>Entity</th><th>Date</th><th>Payee</th><th>Description</th><th>Amount</th><th>Account code</th><th>Pay from</th><th>Invoice / ref</th><th>Bank txn ref</th><th>Hub ID</th><th>{tab === "ready" ? "" : "SQL reference"}</th><th /></tr></thead>
+              <div style={{ overflowX: "auto" }}><table>
+                <thead><tr><th /><th>Entity</th><th>Date</th><th>Payee</th><th>Description</th><th>Amount</th><th>Account code</th><th>Pay from</th><th>Invoice / ref</th><th>Bank txn ref</th><th>Hub ID</th><th>{tab === "ready" ? "" : "SQL reference"}</th><th /></tr></thead>
                 <tbody>
                   {list.map((p, i) => {
                     const k = packages[i];
                     return (
                       <tr key={p.id}>
+                        <td>{reviewer ? <button type="button" className="primary" onClick={() => setOpenId(p.id)}>{tab === "ready" ? "Record posted" : tab === "posted" ? "Track reconciled" : "Open"}</button> : <button type="button" className="neutral" onClick={() => setOpenId(p.id)}>Open</button>}</td>
                         <td>{k.entity}</td><td>{dateText(k.paymentDate)}</td><td>{k.payee}</td><td>{k.description}</td><td>{money(k.amount, k.currency)}</td><td>{k.accountCode || <em>not set</em>}</td><td>{k.payFromAccount}</td><td>{k.invoiceReference || k.voucherReference}</td><td>{k.bankTransactionReference}</td>
                         <td title={k.hubPaymentId}>{k.hubPaymentId.slice(0, 8)}</td>
                         <td>{tab === "ready" ? <StatusTag status={p.status} /> : <>{p.sql_reference} · {dateText(p.sql_posting_date)}{p.reconciled_date ? ` · reconciled ${dateText(p.reconciled_date)}` : ""}</>}</td>
-                        <td>{reviewer ? <button type="button" className="primary" onClick={() => setOpenId(p.id)}>{tab === "ready" ? "Record posted" : tab === "posted" ? "Track reconciled" : "Open"}</button> : <button type="button" className="neutral" onClick={() => setOpenId(p.id)}>Open</button>}</td>
                       </tr>
                     );
                   })}
                 </tbody>
-              </table>
+              </table></div>
             </>
           )}
           {openId && data.payments.find((p) => p.id === openId) && <PaymentDrawer key={openId} data={data} payment={data.payments.find((p) => p.id === openId)!} onClose={() => setOpenId(null)} />}

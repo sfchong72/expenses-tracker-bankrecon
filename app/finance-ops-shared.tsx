@@ -40,7 +40,7 @@ export function FinanceOpsShell({ title, subtitle, active, message, error, child
         </div>
         <AuthBar />
       </div>
-      <nav className="shortcut-bar" aria-label="Finance Operations">
+      <nav className="segmented-tabs" aria-label="Finance Operations">
         {NAV.map((n) => (
           <Link key={n.href} href={n.href} aria-current={n.href === active ? "page" : undefined} className={n.href === active ? "active" : undefined}>{n.label}</Link>
         ))}

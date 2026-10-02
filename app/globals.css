@@ -218,6 +218,8 @@ body > main > *, .panel, .record-list, .section-heading, .sticky-toolbar, .grid 
 .segmented-tabs { display: flex; flex-wrap: wrap; gap: 4px; width: fit-content; max-width: 100%; margin-bottom: 16px; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: #efece6; }
 .segmented-tabs button { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; border-color: transparent; background: transparent; color: var(--muted); white-space: nowrap; }
 .segmented-tabs button.active { border-color: var(--line); background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(40, 35, 32, .08); }
+.segmented-tabs a { min-height: 36px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); font-weight: 700; white-space: nowrap; text-decoration: none; }
+.segmented-tabs a.active { border-color: var(--line); background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(40, 35, 32, .08); }
 .tab-count { min-width: 21px; height: 21px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: #e8e3ec; color: var(--purple-dark); font-size: 10px; }
 
 .sticky-toolbar { position: sticky; top: 56px; z-index: 16; display: flex; gap: 10px; align-items: end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 253, 249, .96); backdrop-filter: blur(10px); }
