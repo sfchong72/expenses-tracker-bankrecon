@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { canVerifyBill } from "@/lib/bill-verification";
 import { ActionGroup, DetailDrawer, FieldValue, MoreActions, PageTabs, StatusBadge } from "@/app/ui-v2";
 
 type Row = Record<string, any>;
@@ -20,6 +21,7 @@ const isBillPayable = (bill: Row) => !["draft", "paid", "cancelled"].includes(bi
 
 export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string }) {
   const db = useMemo(() => createClient(), []);
+  const [role, setRole] = useState<string | null>(null);
   const [entities, setEntities] = useState<Row[]>([]);
   const [suppliers, setSuppliers] = useState<Row[]>([]);
   const [supplierEntities, setSupplierEntities] = useState<Row[]>([]);
@@ -50,6 +52,7 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
   const [voucherItems, setVoucherItems] = useState<Row[]>([{ ...emptyItem }]);
 
   useEffect(() => { void load(); }, [showDemo]);
+  useEffect(() => { void loadRole(); }, []);
 
   async function load() {
     setError("");
@@ -138,6 +141,25 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
     return data.user?.id ?? null;
   }
 
+  async function loadRole() {
+    const userId = await currentUserId();
+    if (!userId) return;
+    const { data } = await db.from("app_profiles").select("role").eq("id", userId).maybeSingle();
+    setRole(data?.role ?? null);
+  }
+
+  // Human verification step (draft -> unpaid) goes through the server route, so RLS, the bill state trigger and the audit entry stay authoritative.
+  async function verifyBill(row: Row) {
+    setError("");
+    if (!canVerifyBill(role, row)) { setError("Only Owner, Finance Manager or Finance Staff can verify a draft bill."); return false; }
+    if (!window.confirm(`Verify "${row.description}" and mark it ready for payment? Confirm the bill details and supporting documents are correct.`)) return false;
+    const res = await fetch("/api/bills/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bill_id: row.id }) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) { setError(json.error || "Bill verification failed"); return false; }
+    setMessage("Bill verified and marked ready for payment."); await load();
+    return true;
+  }
+
   async function saveBill(e: FormEvent) {
     e.preventDefault(); setError("");
     const userId = await currentUserId();
@@ -160,7 +182,10 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
   async function generateDrafts() {
     const res = await fetch("/api/recurring/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month: new Date().toISOString().slice(0, 7) }) });
     const json = await res.json();
-    if (!res.ok) setError(json.error || "Draft generation failed"); else { setMessage(`Generated ${json.bills_created || 0} bill draft(s) and ${json.vouchers_created || 0} voucher draft(s).`); await load(); }
+    if (!res.ok) { setError(json.error || "Draft generation failed"); return; }
+    const errors = Array.isArray(json.errors) ? json.errors : [];
+    if (errors.length) setError(`${errors.length} recurring bill(s) could not be generated: ${errors[0].message}`);
+    setMessage(`Generated ${json.bills_created || 0} bill draft(s)${json.bills_existing ? ` (${json.bills_existing} already existed)` : ""}. Drafts must be verified before payment.`); await load();
   }
 
   async function savePayment(e: FormEvent) {
@@ -266,7 +291,7 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
 
   return <main className="page-shell"><div className="shortcut-bar"><Link href="/suppliers">Suppliers</Link><Link href="/bills">Bills</Link><Link href="/recurring">Recurring</Link><Link href="/payment-vouchers">Payment Vouchers</Link><Link href="/documents">Documents</Link><Link href="/missing-documents">Missing Documents</Link></div><section className="page-hero"><div><span className="eyebrow">Finance Operations</span><h1>{title}</h1><p className="subtitle">{description}</p></div><div className="hero-stats"><strong>{bills.length} bills</strong><strong>{bills.filter((b) => b.due_date <= today && b.payment_status !== "paid").length} due soon</strong><strong>{docs.length} docs</strong></div></section><div className="status-bar"><span>{error || message}</span><span className="actions"><label className="inline"><input type="checkbox" checked={showDemo} onChange={(e) => setShowDemo(e.target.checked)} /> DEMO view</label><button className="neutral" onClick={() => void load()}>Refresh</button></span></div>
     {mode === "suppliers" && <section className="grid"><Panel title="Supplier / Payee"><SupplierForm supplier={supplier} setSupplier={setSupplier} save={saveSupplier} entities={entities} categories={categories} /></Panel><Panel title="Supplier List" action={<span className="actions"><button onClick={() => void demoAction("load")}>Load Phase 2 Demo Data</button><button onClick={() => void demoAction("remove")}>Remove Phase 2 Demo Data</button></span>}><SupplierTable rows={suppliers} entities={entities} supplierEntities={supplierEntities} setSupplier={setSupplier} toggleSupplier={toggleSupplier} /></Panel></section>}
-    {mode === "bills" && <BillsWorkspaceV21 billId={billId} bills={bills} bill={bill} setBill={setBill} entities={entities} suppliers={suppliers} selectedSuppliers={selectedSuppliers} categories={categories} billFiles={billFiles} setBillFiles={setBillFiles} uploading={uploading} onSaveBill={saveBill} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} recurring={recurring} banks={banks} onSaveVoucher={saveVoucherDraft} onFromBill={createFromBill} payment={payment} setPayment={setPayment} onSavePayment={savePayment} vouchers={vouchers} docs={docs} links={links} />}
+    {mode === "bills" && <BillsWorkspaceV21 billId={billId} bills={bills} bill={bill} setBill={setBill} entities={entities} suppliers={suppliers} selectedSuppliers={selectedSuppliers} categories={categories} billFiles={billFiles} setBillFiles={setBillFiles} uploading={uploading} onSaveBill={saveBill} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} recurring={recurring} banks={banks} onSaveVoucher={saveVoucherDraft} onFromBill={createFromBill} payment={payment} setPayment={setPayment} onSavePayment={savePayment} vouchers={vouchers} docs={docs} links={links} role={role} onVerifyBill={verifyBill} />}
     {mode === "recurring" && <section className="grid"><Panel title="Recurring Obligation"><RecurringForm obligation={obligation} setObligation={setObligation} save={saveRecurring} entities={entities} suppliers={activeSuppliers(obligation.entity_id)} /></Panel><Panel title="Monthly Drafts" action={<button onClick={generateDrafts}>Generate Monthly Drafts</button>}>{!recurring.length ? <div className="empty">Nothing to show.</div> : recurring.map((r) => <div key={r.id} className="list-row"><b>{r.description}</b><span>{supplierName(r.supplier_id)} - day {r.due_day} - {money(r.expected_amount)}</span></div>)}</Panel></section>}
     {mode === "vouchers" && <VoucherWorkspaceV2 vouchers={vouchers} voucher={voucher} setVoucher={setVoucher} voucherItems={voucherItems} setVoucherItems={setVoucherItems} items={items} entities={entities} suppliers={suppliers} activeSuppliers={activeSuppliers} categories={categories} bills={bills} recurring={recurring} banks={banks} docs={docs} links={links} profiles={profiles} onSave={saveVoucherDraft} onIssue={issueVoucher} onEdit={editVoucher} onDelete={deleteVoucher} onVoid={voidVoucher} onFromBill={createFromBill} />}
     {mode === "documents" && <section className="grid"><Panel title="Upload Documents"><form onSubmit={uploadLibrary}><p className="wide help">The normal invoice workflow starts from Supplier Bills. This library is for secondary uploads and document review.</p><Select label="Entity" value={upload.entity_id} onChange={(v: string) => setUpload({ ...upload, entity_id: v, linked_record_id: "" })} rows={entities} /><label>Document type<select value={upload.document_type} onChange={(e) => setUpload({ ...upload, document_type: e.target.value })}>{docTypes.map((x) => <option key={x}>{x}</option>)}</select></label><label>Linked type<select value={upload.linked_record_type} onChange={(e) => setUpload({ ...upload, linked_record_type: e.target.value, linked_record_id: "" })}>{linkTypes.map((x) => <option key={x}>{x}</option>)}</select></label><Select label="Record" value={upload.linked_record_id} onChange={(v: string) => setUpload({ ...upload, linked_record_id: v })} rows={recordRows} required={false} empty="Choose" />{!recordRows.length && <p className="wide help">No {upload.linked_record_type.replaceAll("_", " ")} records available. Create the required record first.</p>}<Link href={upload.linked_record_type === "payment_voucher" ? "/payment-vouchers" : upload.linked_record_type === "recurring_obligation" ? "/recurring" : "/bills"}>Create required record</Link><label className="wide">Desktop files<input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/*" onChange={(e) => setLibraryFiles(Array.from(e.target.files ?? []))} /></label><label className="wide">Phone camera - supported mobile devices only<input type="file" accept="image/*" capture="environment" onChange={(e) => setLibraryFiles([...(libraryFiles ?? []), ...Array.from(e.target.files ?? [])])} /></label><FilePreview files={libraryFiles} /><button disabled={uploading || !libraryFiles.length || !upload.linked_record_id}>{uploading ? "Uploading..." : "Upload Documents"}</button></form></Panel><Panel title="Documents">{docs.map((d) => <div key={d.id} className="list-row"><b><Demo row={d} />{d.original_filename}</b><span>{d.document_type} - {Math.round(Number(d.file_size || 0) / 1024)} KB</span><span className="actions"><button onClick={() => void downloadDoc(d.id)}>Preview / Download</button><button className="danger" onClick={() => void deleteDocument(d)}>Delete incorrect file</button></span></div>)}</Panel></section>}
@@ -292,7 +317,7 @@ function RecurringForm({ obligation, setObligation, save, entities, suppliers }:
 type BillTab = "list" | "create" | "voucher";
 
 function BillsWorkspaceV21(props: Row) {
-  const { billId, bills, bill, setBill, entities, suppliers, selectedSuppliers, categories, billFiles, setBillFiles, uploading, onSaveBill, voucher, setVoucher, voucherItems, setVoucherItems, recurring, banks, onSaveVoucher, onFromBill, payment, setPayment, onSavePayment, vouchers, docs, links } = props;
+  const { billId, bills, bill, setBill, entities, suppliers, selectedSuppliers, categories, billFiles, setBillFiles, uploading, onSaveBill, voucher, setVoucher, voucherItems, setVoucherItems, recurring, banks, onSaveVoucher, onFromBill, payment, setPayment, onSavePayment, vouchers, docs, links, role, onVerifyBill } = props;
   const [tab, setTab] = useState<BillTab>("list");
   const [selected, setSelected] = useState<Row | null>(null);
   const voucherDraftRef = useRef<HTMLDivElement>(null);
@@ -317,11 +342,11 @@ function BillsWorkspaceV21(props: Row) {
     </div>
     <PageTabs tabs={[{ id: "list", label: "Bill List", count: bills.length }, { id: "create", label: "Create Bill" }, { id: "voucher", label: "Create PV Draft", count: awaiting.length }]} active={tab} onChange={(id) => setTab(id as BillTab)} label="Bill workspace views" />
 
-    {tab === "list" && <BillListV21 rows={bills} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} />}
+    {tab === "list" && <BillListV21 rows={bills} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} role={role} onVerify={onVerifyBill} />}
     {tab === "create" && <Panel title="Create Supplier Bill"><BillForm bill={bill} setBill={setBill} save={onSaveBill} entities={entities} suppliers={selectedSuppliers} categories={categories} files={billFiles} setFiles={setBillFiles} uploading={uploading} /></Panel>}
     {tab === "voucher" && <>
       <Panel title="Bills Awaiting Payment">
-        {!awaiting.length ? <div className="empty">No unpaid bills are awaiting payment.</div> : <BillListV21 rows={awaiting} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} />}
+        {!awaiting.length ? <div className="empty">No unpaid bills are awaiting payment.</div> : <BillListV21 rows={awaiting} suppliers={suppliers} entities={entities} onView={setSelected} onVoucher={beginVoucher} role={role} onVerify={onVerifyBill} />}
       </Panel>
       <div ref={voucherDraftRef}>
       <Panel title="Payment Voucher Draft">
@@ -332,13 +357,13 @@ function BillsWorkspaceV21(props: Row) {
       </div>
     </>}
 
-    <DetailDrawer open={Boolean(selected)} title={selected?.description || "Bill details"} subtitle={selected?.bill_number || "No bill number"} onClose={() => setSelected(null)} footer={selected && <ActionGroup>{isBillPayable(selected) && <button type="button" className="primary" onClick={() => { beginVoucher(selected); setSelected(null); }}>Create PV Draft</button>}<button type="button" className="neutral" onClick={() => setSelected(null)}>Close</button></ActionGroup>}>
+    <DetailDrawer open={Boolean(selected)} title={selected?.description || "Bill details"} subtitle={selected?.bill_number || "No bill number"} onClose={() => setSelected(null)} footer={selected && <ActionGroup>{canVerifyBill(role, selected) && <button type="button" className="primary" onClick={async () => { if (await onVerifyBill(selected)) setSelected(null); }}>Verify &amp; Mark Ready for Payment</button>}{isBillPayable(selected) && <button type="button" className="primary" onClick={() => { beginVoucher(selected); setSelected(null); }}>Create PV Draft</button>}<button type="button" className="neutral" onClick={() => setSelected(null)}>Close</button></ActionGroup>}>
       {selected && <><div className="detail-grid"><FieldValue label="Entity">{entities.find((row: Row) => row.id === selected.entity_id)?.short_code}</FieldValue><FieldValue label="Supplier">{suppliers.find((row: Row) => row.id === selected.supplier_id)?.supplier_name}</FieldValue><FieldValue label="Bill date">{selected.bill_date}</FieldValue><FieldValue label="Due date">{selected.due_date}</FieldValue><FieldValue label="Total">{money(selected.total_amount)}</FieldValue><FieldValue label="Outstanding">{money(selected.outstanding_amount)}</FieldValue><FieldValue label="Status"><StatusBadge status={selected.payment_status} /></FieldValue><FieldValue label="Evidence">{selected.supporting_document_status}</FieldValue></div><section className="detail-section"><h3>Remarks</h3><p>{selected.remarks || "No remarks."}</p></section><section className="detail-section"><h3>Linked documents</h3><p>{links.filter((link: Row) => link.linked_record_type === "supplier_bill" && link.linked_record_id === selected.id).map((link: Row) => docs.find((doc: Row) => doc.id === link.document_id)?.original_filename).filter(Boolean).join(", ") || "No linked documents."}</p></section></>}
     </DetailDrawer>
   </section>;
 }
 
-function BillListV21({ rows, suppliers, entities, onView, onVoucher }: Row) {
+function BillListV21({ rows, suppliers, entities, onView, onVoucher, role, onVerify }: Row) {
   if (!rows.length) return <div className="empty">No supplier bills match this view.</div>;
   return <div className="record-list bill-record-list">
     <div className="record-list-head"><span>Bill</span><span>Supplier / Entity</span><span>Amount / Due</span><span>Status</span><span>Actions</span></div>
@@ -347,7 +372,7 @@ function BillListV21({ rows, suppliers, entities, onView, onVoucher }: Row) {
       <div className="record-primary"><strong>{suppliers.find((supplier: Row) => supplier.id === row.supplier_id)?.supplier_name || "No supplier"}</strong><span>{entities.find((entity: Row) => entity.id === row.entity_id)?.short_code || "No entity"}</span></div>
       <div className="record-primary"><strong className="record-money">{money(row.total_amount)}</strong><span>Due {row.due_date || "not set"}</span></div>
       <StatusBadge status={row.payment_status} />
-      <ActionGroup><button type="button" className="neutral" onClick={() => onView(row)}>View</button>{isBillPayable(row) && <button type="button" className="primary" onClick={() => onVoucher(row)}>Create PV Draft</button>}</ActionGroup>
+      <ActionGroup><button type="button" className="neutral" onClick={() => onView(row)}>View</button>{canVerifyBill(role, row) && <button type="button" className="primary" onClick={() => void onVerify(row)}>Verify &amp; Mark Ready for Payment</button>}{isBillPayable(row) && <button type="button" className="primary" onClick={() => onVoucher(row)}>Create PV Draft</button>}</ActionGroup>
     </div></div>)}
   </div>;
 }
