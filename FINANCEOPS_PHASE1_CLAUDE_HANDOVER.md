@@ -141,4 +141,6 @@ Later: DB guard rejecting draft bills in `save_payment_voucher_draft`.
 
 **Verification.** `npm run test:financeops` (all tests incl. the original 120), `tests/stage1b-app-fix.test.cjs`, `tsc --noEmit`, `npm run lint`, `npm run build` pass. The opt-in `npm run test:financeops:integration` passed 10/10 on a disposable LOCAL Supabase stack with 0001–0018, 0020–0023 (real RLS, real 0023 and Stage 1B triggers); the stack and its volumes were removed afterwards. The pgTAP suites were not re-run (no database code changed).
 
+**Release review (after owner acceptance of the Phase 1 trade-offs).** Three minimal fixes with regression tests: the status endpoint now re-checks the identity (active data_entry registry identity) like submission; a reviewer-resolved entity must still be allowed for the registry identity and the HMAC key before anything is written; the duplicate check ignores the intake's own earlier draft bill on retry. The local integration suite was rerun 11/11 (adds a second registry identity to prove status/replay ownership against real RLS).
+
 **Still not started (each needs Claire's separate approval):** Production provisioning (Auth user, registry row via the Owner with AAL2, entity access, Vercel variables), enabling the endpoint, giving Hermes the URL and secret, any deployment of this branch, SQL Account.

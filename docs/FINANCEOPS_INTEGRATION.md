@@ -70,11 +70,13 @@ Strict allowlisted schemas (`lib/financeops/schema.ts`): unknown fields fail; an
 | A step fails (storage, database) | `503 retryable`; the intake is never reported complete; the retry resumes. Bill and document primary keys are derived from the intake id, so a retry ADOPTS what the earlier attempt created |
 | A database rule refuses a step (e.g. the bill is no longer draft) | `409 intake_update_rejected` (not retryable): a reviewer must look at it |
 
+Both endpoints re-check on EVERY request that the identity is still an active `data_entry` profile and an active registry row (otherwise `503 integration_identity_inactive`, nothing read or written). When a reviewer has resolved the entity, the resumed intake is only processed if that entity is also allowed for the registry identity and for the HMAC key (`403 entity_not_permitted` otherwise, nothing created). The duplicate check ignores the intake's own earlier draft bill.
+
 `supersedes_intake_id` (optional, same format as `intake_id`, never null) is on the request allow-list. The database enforces the supersession rules (only an unresolved original, one successor, not rejected, the successor must declare an entity); the API answers `already_superseded`, `intake_already_resolved`, `supersedes_intake_not_found`, `supersede_requires_entity`, `supersede_not_permitted` or `supersede_rejected_intake`.
 
 ## Status endpoint
 
-`GET …/bill-intakes/:intake_id`: HMAC-signed (empty body), read through the FinanceOps identity's own RLS, and only for intakes **that identity created** (another id, or an intake created by someone else, is `404`). Returns only `intake_id, process_state, review_status, entity_code, entity_resolved, needs_entity, duplicate_suspected, bill_created, document_attached, flags, next_action, created_at, updated_at`. No bill, document or user ids, suppliers, amounts, bank or payment data.
+`GET …/bill-intakes/:intake_id`: HMAC-signed (empty body), read through the FinanceOps identity's own RLS, and only for intakes **that identity created** (another id, or an intake created by someone else, is `404`, even where RLS would show it: proven with a second registry identity). Returns only `intake_id, process_state, review_status, entity_code, entity_resolved, needs_entity, duplicate_suspected, bill_created, document_attached, flags, next_action, created_at, updated_at`. No bill, document or user ids, suppliers, amounts, bank or payment data.
 
 ## Human review screen
 

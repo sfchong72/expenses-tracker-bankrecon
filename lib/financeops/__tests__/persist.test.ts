@@ -4,7 +4,8 @@ import { sha256Hex } from "../auth";
 import { billIdFor, documentIdFor } from "../ids";
 import { storagePathFor } from "../persist";
 import { ENTITY_IDS, FO_USER, FakeStore } from "./fake-store";
-import { PDF, PDF2, freshStore, getStatus, metadata, post } from "./harness";
+import { readFinanceOpsConfig } from "../config";
+import { CONFIG, ENV, PDF, PDF2, freshStore, getStatus, metadata, post } from "./harness";
 
 // The handlers log database details server-side by design; keep the test output readable.
 const realConsoleError = console.error;
@@ -547,5 +548,111 @@ describe("15: FinanceOps never reviews, resolves or releases", () => {
       const r = await s.updateIntake(id, { review_status });
       assert.equal(r.ok, false);
     }
+  });
+});
+
+describe("B: the endpoints fail closed unless explicitly enabled and fully configured", () => {
+  it("status: disabled, keyless, or without database credentials answers 503 and reads nothing", async () => {
+    const s = store();
+    await post(s);
+    const calls = s.calls.length;
+    assert.equal((await getStatus(s, "fo_bill_01JABCDEF", { config: { ...CONFIG, enabled: false } })).body.error, "integration_disabled");
+    assert.equal((await getStatus(s, "fo_bill_01JABCDEF", { config: { ...CONFIG, keys: [] } })).body.error, "integration_not_configured");
+    assert.equal((await getStatus(s, "fo_bill_01JABCDEF", { config: { ...CONFIG, allowedEntities: [] } })).body.error, "integration_not_configured");
+    assert.equal((await getStatus(null, "fo_bill_01JABCDEF")).body.error, "integration_db_not_configured");
+    assert.equal(s.calls.length, calls);
+  });
+
+  it("the default configuration (no environment at all) is disabled", async () => {
+    const off = readFinanceOpsConfig({});
+    const r = await post(store(), metadata(), PDF, off);
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, "integration_disabled");
+  });
+});
+
+describe("release review regressions", () => {
+  it("C/H: the status endpoint fails closed when the identity is no longer an active data_entry registry identity (it reads nothing)", async () => {
+    for (const patch of [{ role: "finance_staff" }, { role: "owner" }, { profileActive: false }, { registryActive: false }] as const) {
+      const s = store();
+      await post(s);
+      Object.assign(s.identityValue, patch);
+      const readsBefore = s.calls.filter((c) => c === "getIntake").length;
+      const r = await getStatus(s, "fo_bill_01JABCDEF");
+      assert.equal(r.status, 503, JSON.stringify(patch));
+      assert.equal(r.body.error, "integration_identity_inactive");
+      assert.equal(s.calls.filter((c) => c === "getIntake").length, readsBefore, "no intake was read");
+    }
+  });
+
+  it("C: if the identity is deactivated between a failed attempt and the retry, the retry creates nothing more", async () => {
+    const s = store();
+    s.failOn({ method: "insertDocument" });
+    assert.equal((await post(s)).status, 503); // bill exists, intake at bill_created
+    s.identityValue.registryActive = false; // kill switch
+    const r = await post(s);
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, "integration_identity_inactive");
+    assert.equal(s.documents.length, 0);
+    assert.equal(s.links.length, 0);
+    assert.equal(s.intakes[0].process_state, "bill_created");
+  });
+
+  it("E: an entity a reviewer resolved to must still be one the registry identity may act for - nothing is created otherwise", async () => {
+    const s = store();
+    await post(s, metadata({ entity_code: null }));
+    Object.assign(s.intakes[0], { entity_id: ENTITY_IDS.KALER, entity_resolved_at: "2026-10-02T05:00:00Z", process_state: "received" });
+    s.identityValue.allowedEntityIds = [ENTITY_IDS.IEA, ENTITY_IDS.PLC]; // KALER is not allowed for this identity
+    const r = await post(s, metadata({ entity_code: null }));
+    assert.equal(r.status, 403);
+    assert.equal(r.body.error, "entity_not_permitted");
+    assert.equal(s.bills.length, 0);
+    assert.equal(s.objects.size, 0);
+    assert.equal(s.documents.length, 0);
+  });
+
+  it("E: ... and still one the HMAC key may act for (per-key allow-list)", async () => {
+    const s = store();
+    await post(s, metadata({ entity_code: null }));
+    Object.assign(s.intakes[0], { entity_id: ENTITY_IDS.KALER, entity_resolved_at: "2026-10-02T05:00:00Z", process_state: "received" });
+    const narrow = readFinanceOpsConfig({ ...ENV, FINANCEOPS_ALLOWED_ENTITY_CODES_CURRENT: "IEA,PLC" });
+    const blocked = await post(s, metadata({ entity_code: null }), PDF, narrow);
+    assert.equal(blocked.status, 403);
+    assert.equal(s.bills.length, 0);
+    // allowed once the key may act for it
+    const ok = await post(s, metadata({ entity_code: null }), PDF, CONFIG);
+    assert.equal(ok.status, 200);
+    assert.equal(s.bills[0].entity_id, ENTITY_IDS.KALER);
+  });
+
+  it("E: FinanceOps never writes the entity: its updates carry only mechanical columns, and the resolved entity is read, not changed", async () => {
+    const s = store();
+    await post(s, metadata({ entity_code: null }));
+    Object.assign(s.intakes[0], { entity_id: ENTITY_IDS.PLC, entity_resolved_at: "2026-10-02T05:00:00Z", process_state: "received" });
+    await post(s, metadata({ entity_code: null }));
+    for (const patch of s.patches) assert.equal("entity_id" in patch || "entity_code_declared" in patch, false);
+    assert.equal(s.intakes[0].entity_id, ENTITY_IDS.PLC);
+  });
+
+  it("D: retrying after a lagged intake link does not flag the intake's own earlier draft as a duplicate of itself", async () => {
+    const s = store();
+    s.failOn({ method: "updateIntake", nth: 1 }); // bill inserted, intake link lost
+    assert.equal((await post(s)).status, 503);
+    assert.equal(s.bills.length, 1);
+    const retry = await post(s);
+    assert.equal(retry.status, 200);
+    const flags = s.intakes[0].flags;
+    assert.equal(flags.some((f) => f.startsWith("possible_duplicate") || f === "duplicate_suspected_file" || f === "same_file_in_other_entity"), false, flags.join(","));
+    assert.equal(s.intakes[0].review_status, "pending_review");
+    assert.equal(s.bills.length, 1);
+  });
+
+  it("D: a genuinely different earlier bill with the same supplier and invoice number is still flagged on the same path", async () => {
+    const s = store();
+    s.existingBills.push({ id: "b0000000-0000-4000-8000-000000000011", entityId: ENTITY_IDS.IEA, supplierId: "50000000-0000-4000-8000-000000000001", billNumber: "INV-1", totalAmount: 1, billDate: "2025-01-01", paymentStatus: "unpaid" });
+    s.failOn({ method: "updateIntake", nth: 1 });
+    await post(s);
+    await post(s);
+    assert.equal(s.intakes[0].flags.includes("possible_duplicate_invoice_number"), true);
   });
 });

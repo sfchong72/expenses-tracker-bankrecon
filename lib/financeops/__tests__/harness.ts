@@ -56,17 +56,17 @@ export function depsFor(store: IntakeStore | null | (() => Promise<IntakeStore |
 }
 
 /** POST a signed intake through the REAL handler against the given store. */
-export async function post(store: IntakeStore, meta: unknown = metadata(), bytes: Uint8Array = PDF) {
+export async function post(store: IntakeStore, meta: unknown = metadata(), bytes: Uint8Array = PDF, config: FinanceOpsConfig = CONFIG) {
   const parts = await multipart(meta, bytes);
-  return handleBillIntake({ method: "POST", path: PATH, query: "", headers: signedHeaders("POST", PATH, parts.raw, parts.contentType), rawBody: parts.raw }, CONFIG, depsFor(store));
+  return handleBillIntake({ method: "POST", path: PATH, query: "", headers: signedHeaders("POST", PATH, parts.raw, parts.contentType), rawBody: parts.raw }, config, depsFor(store));
 }
 
-export async function getStatus(store: IntakeStore, intakeId: string, over: { sign?: boolean; method?: string } = {}) {
+export async function getStatus(store: IntakeStore | null, intakeId: string, over: { sign?: boolean; method?: string; config?: FinanceOpsConfig } = {}) {
   const path = `${PATH}/${intakeId}`;
   const empty = new Uint8Array(0);
   const method = over.method ?? "GET";
   const headers = over.sign === false ? new Headers() : signedHeaders(method, path, empty);
-  return handleBillIntakeStatus({ method, path, query: "", headers, rawBody: empty }, intakeId, CONFIG, depsFor(store));
+  return handleBillIntakeStatus({ method, path, query: "", headers, rawBody: empty }, intakeId, over.config ?? CONFIG, depsFor(store));
 }
 
 export function freshStore(): FakeStore {

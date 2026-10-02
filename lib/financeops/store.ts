@@ -38,6 +38,11 @@ export type FinanceOpsIdentity = {
 
 export type EntityRef = { id: string; code: string };
 
+/** The identity must be an ACTIVE data_entry profile AND an active registry row. Anything else fails closed. */
+export function identityUsable(identity: Pick<FinanceOpsIdentity, "role" | "profileActive" | "registryActive">): boolean {
+  return identity.profileActive && identity.registryActive && identity.role === "data_entry";
+}
+
 export type IntakeRow = {
   id: string;
   intake_id: string;

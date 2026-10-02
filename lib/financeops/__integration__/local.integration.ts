@@ -32,6 +32,7 @@ const USERS = {
   fo: "financeops@it.invalid",
   management: "management@it.invalid",
   staffIeaOnly: "staff-iea-only@it.invalid",
+  fo2: "financeops2@it.invalid",
 } as const;
 type Who = keyof typeof USERS;
 
@@ -287,8 +288,29 @@ describe("FinanceOps application against a local Supabase stack (real RLS + real
     const text = JSON.stringify(s.body);
     for (const internal of [ids.fo, "supplier_bill_id", "document_id", "payload"]) assert.equal(text.includes(internal), false, internal);
     assert.equal((await getStatus(fo(), "fo_it_nosuchintake01")).status, 404);
-    // another user's session would see the row through entity RLS, but the handler only reports intakes the identity created
-    assert.equal((await getStatus(createSupabaseIntakeStore(clients.intern), id)).status, 404);
+    // a session that is not an active data_entry registry identity (the intern) is refused outright
+    assert.equal((await getStatus(createSupabaseIntakeStore(clients.intern), id)).status, 503);
+  });
+
+  it("H: a SECOND FinanceOps identity can see this intake through entity RLS, but the status endpoint and replay only act on intakes the identity created itself", async () => {
+    const bytes = pdf("ownership");
+    const id = uid();
+    assert.equal((await post(fo(), meta(id, bytes), bytes)).status, 201);
+    // RLS really does let fo2 read it (entity-scoped Finance visibility) ...
+    const seen = await clients.fo2.from("finance_intake_submissions").select("intake_id").eq("intake_id", id);
+    assert.equal(seen.data?.length, 1);
+    const fo2 = createSupabaseIntakeStore(clients.fo2);
+    // ... but the application ownership check hides it, and fo2 can neither read its status nor replay/adopt it
+    assert.equal((await getStatus(fo2, id)).status, 404);
+    const replay = await post(fo2, meta(id, bytes), bytes);
+    assert.equal(replay.status, 409);
+    assert.equal(replay.body.error, "intake_conflict");
+    // fo2's own intake works, and fo cannot read it either
+    const bytes2 = pdf("ownership2");
+    const id2 = uid();
+    assert.equal((await post(fo2, meta(id2, bytes2), bytes2)).status, 201);
+    assert.equal((await getStatus(fo2, id2)).status, 200);
+    assert.equal((await getStatus(fo(), id2)).status, 404);
   });
 
   it("20: FinanceOps cannot touch bank, payment, voucher or reconciliation data, nor create a bill with another status", async () => {

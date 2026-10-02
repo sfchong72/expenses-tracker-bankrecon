@@ -7,7 +7,7 @@ import type { RateLimiter } from "./rate-limit";
 import { respond, type HandlerResponse } from "./responses";
 import { checkFileEnvelope, MAX_FILE_BYTES, parseBillIntake } from "./schema";
 import { summarizeIntake } from "./status";
-import type { IntakeStore } from "./store";
+import { identityUsable, type IntakeStore } from "./store";
 
 /**
  * Framework-free handlers for the FinanceOps bill-intake endpoints:
@@ -165,6 +165,7 @@ export async function handleBillIntake(req: HandlerRequest, config: FinanceOpsCo
     file: { bytes, size: file.size, mimeType: intake.document.mime_type, sha256: verified.sha256 },
     keyId: auth.keyId,
     requestId: requestIdFrom(req.headers),
+    allowedEntityCodes: allowedForKey,
   });
 }
 
@@ -200,6 +201,11 @@ export async function handleBillIntakeStatus(req: HandlerRequest, intakeId: stri
   if (!who.ok) {
     console.error("financeops status identity failed", { detail: `${who.error.kind}: ${who.error.message}` });
     return respond(503, { error: "integration_identity_unavailable", retryable: true }, { "Retry-After": "30" });
+  }
+  // Same fail-closed identity rule as submission: a deactivated, registry-disabled or re-roled identity reads nothing.
+  if (!identityUsable(who.value)) {
+    console.error("financeops status refused: identity is not an active data_entry registry identity");
+    return respond(503, { error: "integration_identity_inactive" });
   }
   const found = await store.getIntake(intakeId);
   if (!found.ok) {

@@ -4,7 +4,7 @@ import { buildDraftBillProposal } from "./intake";
 import { respond, type HandlerResponse } from "./responses";
 import type { AllowedMime, FinanceOpsBillIntake } from "./schema";
 import { summarizeIntake } from "./status";
-import type { EntityRef, FinanceOpsIdentity, IntakePatch, IntakeRow, IntakeStore, NewBill, StoreError } from "./store";
+import { identityUsable, type EntityRef, type FinanceOpsIdentity, type IntakePatch, type IntakeRow, type IntakeStore, type NewBill, type StoreError } from "./store";
 import { matchCategory, matchSupplier } from "./supplier-match";
 
 /**
@@ -29,6 +29,8 @@ export type PersistInput = {
   file: { bytes: Uint8Array; size: number; mimeType: AllowedMime; sha256: string };
   keyId: string;
   requestId: string;
+  /** Entity codes this HMAC key may act for (the per-key allow-list from configuration). */
+  allowedEntityCodes: readonly string[];
 };
 
 const RETRY_AFTER = { "Retry-After": "30" };
@@ -68,7 +70,7 @@ export async function persistBillIntake(store: IntakeStore, input: PersistInput)
   const who = await store.identity();
   if (!who.ok) return unavailable(who.error, intake.intake_id, "integration_identity_unavailable");
   const identity = who.value;
-  if (!identity.profileActive || identity.role !== "data_entry" || !identity.registryActive) {
+  if (!identityUsable(identity)) {
     console.error("financeops identity is not an active data_entry registry identity", { role: identity.role, profileActive: identity.profileActive, registryActive: identity.registryActive });
     return respond(503, { error: "integration_identity_inactive", intake_id: intake.intake_id });
   }
@@ -122,10 +124,10 @@ export async function persistBillIntake(store: IntakeStore, input: PersistInput)
     return mapInsertError(inserted.error, intake.intake_id);
   }
 
-  return advance(store, identity, { intake, file, replay }, row);
+  return advance(store, identity, { intake, file, replay, allowedEntityCodes: input.allowedEntityCodes }, row);
 }
 
-type Ctx = { intake: FinanceOpsBillIntake; file: PersistInput["file"]; replay: boolean };
+type Ctx = { intake: FinanceOpsBillIntake; file: PersistInput["file"]; replay: boolean; allowedEntityCodes: readonly string[] };
 
 async function entityCodeOf(store: IntakeStore, row: IntakeRow): Promise<{ ok: true; code: string | null } | { ok: false; error: StoreError }> {
   if (row.entity_code_declared) return { ok: true, code: row.entity_code_declared };
@@ -152,6 +154,11 @@ async function advance(store: IntakeStore, identity: FinanceOpsIdentity, ctx: Ct
   const entityId = row.entity_id;
   const entityCode = code.code;
   if (!entityCode) return unavailable("entity code could not be resolved", row.intake_id);
+  // A reviewer may have resolved the entity to one this registry identity or this key is not allowed to act for.
+  // Nothing is created for it (the same limits that apply to a declared entity apply to a resolved one).
+  if (row.process_state !== "complete" && (!identity.allowedEntityIds.includes(entityId) || !ctx.allowedEntityCodes.includes(entityCode))) {
+    return respond(403, { error: "entity_not_permitted", message: "The resolved entity is outside what this integration may act for. No bill or document was created.", ...summary(row, entityCode) });
+  }
 
   for (let guard = 0; guard < 6; guard += 1) {
     if (row.process_state === "complete") {
@@ -217,10 +224,12 @@ async function stepCreateBill(store: IntakeStore, identity: FinanceOpsIdentity, 
 
   const context = await store.loadDuplicateContext({ entityId, fileSha256: file.sha256, supplierId: supplier.status === "exact" ? supplier.supplierId : null });
   if (!context.ok) return { response: unavailable(context.error, row.intake_id) };
+  // A retry after a lagged link can see this intake's OWN earlier draft bill; it is not a duplicate of itself.
+  const ownBillId = billIdFor(intake.intake_id);
   const dup = classifyDuplicates(
     { entityId, supplierId: supplier.status === "exact" ? supplier.supplierId : null, invoiceNumber: intake.invoice.number, totalAmount: bill.total_amount, billDate: bill.bill_date, fileSha256: file.sha256 },
-    context.value.bills,
-    context.value.documents,
+    context.value.bills.filter((b) => b.id !== ownBillId),
+    context.value.documents.filter((d) => d.billId !== ownBillId),
   );
   const flags = Array.from(new Set([...proposalFlags, ...dup.flags]));
 

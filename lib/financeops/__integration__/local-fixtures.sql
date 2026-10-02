@@ -16,7 +16,8 @@ from (values
   ('a0000000-0000-4000-8000-000000000004', 'intern@it.invalid'),
   ('a0000000-0000-4000-8000-000000000005', 'financeops@it.invalid'),
   ('a0000000-0000-4000-8000-000000000006', 'management@it.invalid'),
-  ('a0000000-0000-4000-8000-000000000007', 'staff-iea-only@it.invalid')
+  ('a0000000-0000-4000-8000-000000000007', 'staff-iea-only@it.invalid'),
+  ('a0000000-0000-4000-8000-000000000008', 'financeops2@it.invalid')
 ) v(id, email);
 
 insert into auth.identities (provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
@@ -31,7 +32,8 @@ from (values
   ('a0000000-0000-4000-8000-000000000004'::uuid, 'data_entry'),
   ('a0000000-0000-4000-8000-000000000005'::uuid, 'data_entry'),
   ('a0000000-0000-4000-8000-000000000006'::uuid, 'management'),
-  ('a0000000-0000-4000-8000-000000000007'::uuid, 'finance_staff')
+  ('a0000000-0000-4000-8000-000000000007'::uuid, 'finance_staff'),
+  ('a0000000-0000-4000-8000-000000000008'::uuid, 'data_entry')
 ) v(id, role) where p.id = v.id;
 
 -- entity access (owner sees everything without rows)
@@ -45,13 +47,19 @@ from (values
   ('a0000000-0000-4000-8000-000000000005', 'IEA', 'data_entry'), ('a0000000-0000-4000-8000-000000000005', 'IETA', 'data_entry'),
   ('a0000000-0000-4000-8000-000000000005', 'PLC', 'data_entry'), ('a0000000-0000-4000-8000-000000000005', 'KALER', 'data_entry'),
   ('a0000000-0000-4000-8000-000000000006', 'IEA', 'read_only'),
-  ('a0000000-0000-4000-8000-000000000007', 'IEA', 'finance_staff')
+  ('a0000000-0000-4000-8000-000000000007', 'IEA', 'finance_staff'),
+  ('a0000000-0000-4000-8000-000000000008', 'IEA', 'data_entry')
 ) v(u, code, r) join public.entities e on e.short_code = v.code;
 
 -- the FinanceOps registry identity (data_entry, all four entities); the owner registers it (AAL2 in the app; direct here)
 insert into public.finance_integration_identities (user_id, integration, active_status, allowed_entity_ids, note, created_by)
 select 'a0000000-0000-4000-8000-000000000005', 'financeops', true, array_agg(e.id), 'integration test identity', 'a0000000-0000-4000-8000-000000000001'
 from public.entities e where e.short_code in ('IEA', 'IETA', 'PLC', 'KALER');
+
+-- a SECOND, separate FinanceOps registry identity (IEA only): used to prove status/replay ownership against real RLS
+insert into public.finance_integration_identities (user_id, integration, active_status, allowed_entity_ids, note, created_by)
+select 'a0000000-0000-4000-8000-000000000008', 'financeops', true, array_agg(e.id), 'second integration test identity', 'a0000000-0000-4000-8000-000000000001'
+from public.entities e where e.short_code = 'IEA';
 
 -- reference data: one supplier on IEA, one expense category
 insert into public.suppliers (id, supplier_name, registration_number, active_status)
