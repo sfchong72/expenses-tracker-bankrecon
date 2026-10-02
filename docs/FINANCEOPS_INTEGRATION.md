@@ -66,6 +66,8 @@ After successful authentication and validation the route returns `503 intake_per
 
 ## Database identity (future) and a note on the stored password
 
+**Hard rule (after the Stage 1B release): the FinanceOps identity must be `data_entry` and must never be `finance_staff` (or any other role).** FinanceOps is maker/assistant, never checker: it cannot perform `draft → unpaid` (Stage 1B: `POST /api/bills/verify`, Owner/Finance Manager/Finance Staff; the database trigger already blocks `data_entry`). Proposed Migration A (design only, `docs/financeops/migration-a/`) additionally designates the identity in a registry and fails closed if it is ever promoted.
+
 Plan (D1): a dedicated Supabase Auth user with the existing `data_entry` role used server-side by the Hub so RLS applies — configured via `FINANCEOPS_DB_USER_EMAIL` / `FINANCEOPS_DB_USER_PASSWORD`. Not provisioned; **do not create it in Production before the Stage 1B release** (the legacy RLS would let it write any bill status).
 
 **Transitional:** the `data_entry` identity is broader than ideal (see the spec §7); a dedicated least-privilege FinanceOps capability/RPC boundary should be considered before large-scale permanent automation. Not created now.

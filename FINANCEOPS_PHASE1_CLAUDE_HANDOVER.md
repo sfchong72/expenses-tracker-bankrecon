@@ -4,8 +4,8 @@ Read this first, then `FINANCEOPS_HUB_PHASE1_IMPLEMENTATION_SPEC.md` (authoritat
 
 ## State
 
-- Branch: `claude/financeops-phase1-prep` (not pushed, not merged).
-- Base: `338125acccc8420ba96955e77eb78ec4dd7fb903` (Stage 1B). `origin/main` (`0a8ba48`) is an ancestor of it — no divergence.
+- Branch: `claude/financeops-phase1-prep` (local only: no remote branch, no upstream; not pushed, not merged).
+- **Base (current): released `origin/main` = `31e84d3d56cf1ee8ed047ea2873147fa71119cf3`** ("STATE D — 0022 applied and application deployed — Stage 1B release complete"). The branch was rebased from the old Stage 1B base `338125a`; pre-rebase backup branch `backup/financeops-phase1-prep-pre-rebase` = `f0cb234`. Rebased chain: `568fac1`, `69431ed`, `6329683`, `fff5c24`, `785a11e` (all patch-identical to the originals per `git range-diff`); later commits on top of that chain are the Migration A design package. Do **not** base FinanceOps work on `338125a`.
 - Worktree used: `<repo>/.claude/worktrees/financeops-prep` (git-ignored via `.git/info/exclude`). The main checkout has an old, unrelated paused rebase on `agent/option-a-publish-clean` (since 2026-08-06) — left untouched; do not `--abort`/`--continue` it without Claire's say-so.
 - This branch makes **no database change**: no migration, no RLS, no SECURITY DEFINER, no Production contact.
 
@@ -55,6 +55,16 @@ Spec §4a.1–4a.2, §8, §11, §18, §19 and Appendix C now record: the two res
 4. Migration A additions: `entity_resolved_by/at/note`, `supersedes_intake_id` (UNIQUE self-reference), entity-resolution immutability trigger, "resolved OR superseded, never both" check, reviewer-only UPDATE policy for the entity columns, and the central Finance-review visibility helper (new SECURITY DEFINER surface → stop-and-review).
 5. pgTAP cases to add with Migration A: intern cannot read or resolve an unresolved intake; Finance Staff can resolve only to an entity they may access; resolution is set-once; integration identity cannot update any intake row; superseded + resolved cannot both occur; same `intake_id` with a different entity ⇒ conflict; second successor for one original is rejected.
 
+## Revision 4 — Stage 1B released; Migration A design (documentation only)
+
+**New authoritative rules after Stage 1B closure.** Hermes FinanceOps' identity **must be `data_entry` and must never be `finance_staff`**. FinanceOps may create/extract/submit draft intake only; it must not perform `draft → unpaid` (Stage 1B route `POST /api/bills/verify`, Owner/Finance Manager/Finance Staff — the DB trigger already blocks `data_entry`). Do not create vouchers while a bill is draft; do not bypass the Stage 1B verification workflow. The in-memory rate limiter is **not** a hard boundary; the HMAC five-line canonical signature (timestamp / METHOD / canonical path / canonical query / body hash) is unchanged and remains the integration boundary.
+
+**Rebase review result.** No file overlap with Stage 1B's four application commits (`b08a302`, `e2aefea`, `93447b1`, `31e84d3`); 0022 blob unchanged (`1eadd009…`); focused tests 120/120, `tsc --noEmit`, `npm run lint`, `npm run build` all pass on the rebased branch. Earlier assumptions still hold; two PR-0 items are now delivered on main. Note: `created_by = auth.uid()` must be sent on bill inserts (e2aefea) — persistence must do the same.
+
+**Migration A design package** (proposal only — not applied, not numbered, not under `supabase/migrations/`): `docs/financeops/migration-a/MIGRATION_A_REVIEW_PACKAGE.md` (inventory, access matrix, D1–D11 traceability, security-sensitive items, open decisions Q1–Q9, pgTAP plan, rollout/rollback) and `PROPOSED_migration_a_financeops_intake.sql.txt` (syntax- and PL/pgSQL-parsed only; never executed). Highlights: tables `finance_integration_identities` (designation registry, not a role) and `finance_intake_submissions`; nullable `entity_id`; `entity_resolved_by/at/note`; `supersedes_intake_id` (unique, one successor); idempotency via unique `intake_id`; four-eyes and column-level rules in a row trigger; DB-enforced audit; two new SECURITY DEFINER read-only helpers; no DELETE grant; Stage 1B objects untouched.
+
+**Next steps (nothing started):** (1) Claire answers Q1–Q9 / approves the design; (2) replay 0001–0022 + Migration A in a **disposable** local Supabase stack and run the new pgTAP plus the Stage 1B suites and advisors; (3) only then application persistence (insert-first handler, `supersedes_intake_id` in the schema allowlist, status endpoint, "Resolve entity" UI for Finance Staff+ replacing the generic entity checkbox); (4) separately approved Production window for the migration and the FinanceOps Auth user. No Production DB, Vercel Production, migration ledger or SQL Account change has occurred.
+
 ## Intentionally disabled / not implemented
 
 Persistence of intakes and bills, idempotency table, review state, `payment_evidence` link type, any change to `user_can_access_linked_record`, new SECURITY DEFINER RPCs, FinanceOps Auth user, Phase 1B, wiring the review UI, status endpoint `GET /bill-intakes/{id}` (needs the table), DB-level draft-bill guard in `save_payment_voucher_draft`.
@@ -70,6 +80,8 @@ Later: DB guard rejecting draft bills in `save_payment_voucher_draft`.
 `FINANCEOPS_INTAKE_ENABLED`, `FINANCEOPS_ALLOWED_ENTITY_CODES`, `FINANCEOPS_ALLOWED_ENTITY_CODES_CURRENT`, `FINANCEOPS_ALLOWED_ENTITY_CODES_NEXT`, `FINANCEOPS_MAX_SKEW_SECONDS`, `FINANCEOPS_RATE_LIMIT_PER_MINUTE`, `FINANCEOPS_HMAC_KEY_ID_CURRENT`, `FINANCEOPS_HMAC_SECRET_CURRENT`, `FINANCEOPS_HMAC_KEY_ID_NEXT`, `FINANCEOPS_HMAC_SECRET_NEXT`, `FINANCEOPS_DB_USER_EMAIL`, `FINANCEOPS_DB_USER_PASSWORD` (last two unused until persistence exists).
 
 ## How to move this branch onto the final base
+
+> **Done (2026-10-02):** rebased onto released main `31e84d3` with `git rebase --onto origin/main 338125a claude/financeops-phase1-prep` (conflict-free). The steps below are kept as the method for any future re-base.
 
 1. Claire supplies Codex's final PR-0 commit (call it `P`) and, later, the released Stage 1B/main state (`B`).
 2. Inspect `P`: `git fetch origin && git log --oneline 338125a..P && git diff --stat 338125a P`. Expect no overlap with this branch (PR-0 touches `app/phase2-workspace.tsx` and `app/api/payment-vouchers/generate/route.ts`; this branch touches `lib/financeops/**`, the new route, `lib/supabase/middleware.ts`, `package.json`, `.env.example`, `app/intake-review.tsx`, docs; `tsconfig.json` is unchanged).
