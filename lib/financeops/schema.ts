@@ -2,11 +2,12 @@
  * Strict Phase 1A invoice-intake payload validation (no external dependencies).
  *
  * Fail-closed rules:
- *  - unknown fields are rejected at every level;
- *  - fields FinanceOps must never set (status/approval/payment/bank/reconciliation/
- *    SQL/verification/ownership/authoritative ids) are rejected with their own code;
- *  - entity comes only from an approved `entity_code` (or null = uncertain, which the
- *    caller must route to human review - never guessed);
+ *  - strict ALLOWLISTED schemas: any key not listed for its object is rejected (unknown_field);
+ *  - exact, explicitly prohibited field names (payment_status, created_by, approved_by,
+ *    bank_transaction_id, sql_document_id, authoritative ids, ...) are rejected as
+ *    forbidden_field - exact match only, no substring or token matching;
+ *  - entity comes only from an approved `entity_code`; null means "uncertain" and yields an
+ *    intake for human review only - it must never produce a supplier bill and is never guessed;
  *  - OCR fields may be null; null means "not stated / uncertain", never a default.
  */
 
@@ -91,64 +92,38 @@ export type ParseResult =
   | { ok: true; value: FinanceOpsBillIntake }
   | { ok: false; issues: Issue[] };
 
-// ---------------------------------------------------------------- forbidden keys
+// ---------------------------------------------------------------- prohibited fields
 
-const FORBIDDEN_EXACT_KEYS = new Set([
-  "id",
-  "supplier_id",
-  "entity_id",
-  "bill_id",
-  "document_id",
-  "created_by",
-  "updated_by",
-  "uploaded_by",
-  "reviewed_by",
-  "verified_by",
-  "payment_status",
-  "supporting_document_status",
+/**
+ * Validation model: every object is checked against an explicit ALLOWLIST of keys. Any other
+ * key is rejected (unknown_field). Separately, the exact field names below are sensitive or
+ * authoritative internal fields that FinanceOps must never set; if one appears it is reported as
+ * forbidden_field so the audit trail says what was attempted. There is NO substring or token
+ * matching: a key is prohibited only when it equals one of these names exactly (case-sensitive),
+ * and everything not on an allowlist fails closed anyway.
+ */
+export const PROHIBITED_FIELDS: ReadonlySet<string> = new Set([
+  // authoritative internal ids
+  "id", "supplier_id", "entity_id", "bill_id", "supplier_bill_id", "document_id", "payment_voucher_id", "bill_payment_id",
+  "bank_account_id", "expense_category_id", "recurring_obligation_id",
+  // ownership / audit actors
+  "created_by", "updated_by", "uploaded_by", "reviewed_by", "verified_by",
+  // lifecycle and workflow state
+  "status", "payment_status", "supporting_document_status", "review_status", "process_state", "approval_status",
+  // approval and verification
+  "approved_by", "approved_at", "verified_at", "reviewed_at",
+  // payment
+  "paid_at", "paid_by", "paid_amount", "outstanding_amount",
+  // bank and reconciliation
+  "bank_transaction_id", "reconciliation_date", "reconciliation_id", "reconciled_at", "reconciled_by",
+  // SQL Account
+  "sql_document_id", "sql_posted_at", "sql_posted", "sql_account_ref",
+  // storage / provenance internals
+  "storage_path", "file_hash", "data_origin", "is_demo",
 ]);
 
-const FORBIDDEN_TOKENS = new Set([
-  "status",
-  "approve",
-  "approved",
-  "approval",
-  "approver",
-  "paid",
-  "payment",
-  "payments",
-  "bank",
-  "reconcile",
-  "reconciled",
-  "reconciliation",
-  "sql",
-  "verified",
-  "verify",
-  "verification",
-]);
-
-export function isForbiddenKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  if (FORBIDDEN_EXACT_KEYS.has(lower)) return true;
-  const tokens = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-  return tokens.some((t) => FORBIDDEN_TOKENS.has(t));
-}
-
-function scanForbidden(value: unknown, path: string, issues: Issue[], depth = 0): void {
-  if (depth > 6 || value === null || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    value.forEach((item, i) => scanForbidden(item, `${path}[${i}]`, issues, depth + 1));
-    return;
-  }
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    const childPath = path ? `${path}.${key}` : key;
-    if (isForbiddenKey(key)) issues.push({ path: childPath, code: "forbidden_field" });
-    scanForbidden(child, childPath, issues, depth + 1);
-  }
+export function isProhibitedField(key: string): boolean {
+  return PROHIBITED_FIELDS.has(key);
 }
 
 // ---------------------------------------------------------------- primitives
@@ -163,8 +138,9 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 function checkKeys(obj: Record<string, unknown>, allowed: readonly string[], path: string, ctx: Ctx): void {
   for (const key of Object.keys(obj)) {
-    if (isForbiddenKey(key)) continue; // already reported by scanForbidden
-    if (!allowed.includes(key)) ctx.issues.push({ path: path ? `${path}.${key}` : key, code: "unknown_field" });
+    const keyPath = path ? `${path}.${key}` : key;
+    if (isProhibitedField(key)) ctx.issues.push({ path: keyPath, code: "forbidden_field" });
+    else if (!allowed.includes(key)) ctx.issues.push({ path: keyPath, code: "unknown_field" });
   }
 }
 
@@ -306,7 +282,6 @@ const TOP_LEVEL_KEYS = ["intake_id", "source", "entity_code", "supplier", "invoi
 export function parseBillIntake(input: unknown): ParseResult {
   if (!isPlainObject(input)) return { ok: false, issues: [{ path: "", code: "not_an_object" }] };
   const ctx: Ctx = { issues: [] };
-  scanForbidden(input, "", ctx.issues);
   checkKeys(input, TOP_LEVEL_KEYS, "", ctx);
 
   // intake_id
@@ -410,9 +385,8 @@ export function parseBillIntake(input: unknown): ParseResult {
     if (fieldsObj) {
       for (const [name, raw] of Object.entries(fieldsObj)) {
         const p = `extraction.fields.${name}`;
-        if (isForbiddenKey(name)) continue;
         if (!(EXTRACTION_FIELD_NAMES as readonly string[]).includes(name)) {
-          ctx.issues.push({ path: p, code: "unknown_field" });
+          ctx.issues.push({ path: p, code: isProhibitedField(name) ? "forbidden_field" : "unknown_field" });
           continue;
         }
         if (!isPlainObject(raw)) {

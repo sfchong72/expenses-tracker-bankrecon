@@ -31,22 +31,25 @@ Only variable **names** are committed (see `.env.example`). Values live in Verce
 Headers: `X-FinanceOps-Key-Id`, `X-FinanceOps-Timestamp` (unix seconds), `X-FinanceOps-Signature: v1=<hex>`.
 
 ```
-signing string = "{timestamp}\n{METHOD}\n{path_and_query}\n{sha256_hex(raw_body)}"
+signing string = "{timestamp}\n{METHOD}\n{canonical_path}\n{canonical_query_string}\n{sha256_hex(raw_body)}"
 signature      = HMAC_SHA256(secret, signing string)
 ```
+
+Canonical query string: leading `?` and empty pairs dropped; keys/values percent-decoded (`+` = space; a literal plus is `%2B`) then re-encoded with the RFC 3986 unreserved set and upper-case hex; duplicate keys kept; pairs sorted by encoded key then value; empty string when there is no query. Reordering pairs is harmless; changing, adding or removing any parameter invalidates the signature; malformed percent-encoding is rejected. `canonical_path` is the pathname exactly as sent.
 
 - Timestamp tolerance: 300 s by default (`FINANCEOPS_MAX_SKEW_SECONDS`, 30–900).
 - Constant-time comparison; every authentication failure returns the same opaque `401 {"error":"unauthorized"}`.
 - **Current/next rotation:** configure `…_CURRENT` and `…_NEXT` (different key ids). Hermes switches to the next key when told; Claire/admin then promotes next → current and clears next.
-- The cookie-session middleware is bypassed **only** for paths under `/api/integrations/financeops/` (strict matcher, `lib/financeops/routes.ts`); `/api/admin/**` and every other route are unchanged.
+- The cookie-session middleware is bypassed **only** for paths under `/api/integrations/financeops/v1/` (strict matcher, `lib/financeops/routes.ts`, which also refuses `..`, `//`, backslash, `;` and any `%`); `/api/admin/**` and every other route are unchanged. Unexpected methods get 405.
+- Rate limit: per authenticated key, default 30/min (`FINANCEOPS_RATE_LIMIT_PER_MINUTE`), best-effort per warm serverless instance.
 
 ## Entity allow-list
 
-`FINANCEOPS_ALLOWED_ENTITY_CODES` (subset of `IEA,IETA,PLC,KALER`; `PLC` = Premier Language Centre). Empty means nothing is allowed (fails closed). Every intake must resolve to exactly one authorised entity. If the entity is uncertain FinanceOps sends `entity_code: null`; the case is routed to human review and the entity is never guessed.
+`FINANCEOPS_ALLOWED_ENTITY_CODES` (subset of `IEA,IETA,PLC,KALER`; `PLC` = Premier Language Centre) is the ceiling; `FINANCEOPS_ALLOWED_ENTITY_CODES_CURRENT/_NEXT` may narrow a key, never widen it. Empty means nothing is allowed (fails closed). Every **Supplier Bill** must resolve to exactly one authorised entity. If the entity is uncertain FinanceOps sends `entity_code: null`: an *intake* may exist, but **no bill is created** (no placeholder entity) and the case goes to human review; the entity is never guessed.
 
 ## Validation and limits
 
-Strict schema (`lib/financeops/schema.ts`): unknown fields fail; fields FinanceOps must never set (`payment_status`, approval, paid/payment, bank, reconciliation, SQL, verification, `created_by`, authoritative `supplier_id`/`entity_id`/ids) are rejected. Files: PDF/JPEG/PNG only, **max 4 MB** (larger → `413` with a manual-upload requirement). The server re-computes the SHA-256 and sniffs the file signature; a mismatch is rejected.
+Strict allowlisted schemas (`lib/financeops/schema.ts`): unknown fields fail; an exact-name prohibited list (`payment_status`, `created_by`, `approved_by`, `approved_at`, `paid_at`, `bank_transaction_id`, `reconciliation_date`, `sql_document_id`, `sql_posted_at`, authoritative ids, …) is rejected as `forbidden_field`. No substring/token matching. Files: PDF/JPEG/PNG only, **max 4 MB** (larger → `413` with a manual-upload requirement). The server re-computes the SHA-256 and sniffs the file signature; a mismatch is rejected.
 
 ## Human verification (not yet wired)
 
@@ -64,6 +67,8 @@ After successful authentication and validation the route returns `503 intake_per
 ## Database identity (future) and a note on the stored password
 
 Plan (D1): a dedicated Supabase Auth user with the existing `data_entry` role used server-side by the Hub so RLS applies — configured via `FINANCEOPS_DB_USER_EMAIL` / `FINANCEOPS_DB_USER_PASSWORD`. Not provisioned; **do not create it in Production before the Stage 1B release** (the legacy RLS would let it write any bill status).
+
+**Transitional:** the `data_entry` identity is broader than ideal (see the spec §7); a dedicated least-privilege FinanceOps capability/RPC boundary should be considered before large-scale permanent automation. Not created now.
 
 A stored DB-user password is the simplest RLS-preserving option and is acceptable only as a Vercel server-side secret. Alternatives considered: minting JWTs requires the project JWT secret (as sensitive as the service-role key — rejected); a SECURITY DEFINER intake RPC granted to a dedicated role (post-Phase-1 hardening, also makes bill + document + intake creation atomic) — to be reconsidered after Phase 1 proves useful. No silent redesign was made.
 

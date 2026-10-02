@@ -1,7 +1,8 @@
-import { FINANCEOPS_HEADERS, verifyRequest } from "./auth.ts";
-import type { FinanceOpsConfig } from "./config.ts";
-import { computePayloadHash, verifyDocumentBytes } from "./intake.ts";
-import { checkFileEnvelope, MAX_FILE_BYTES, parseBillIntake } from "./schema.ts";
+import { FINANCEOPS_HEADERS, verifyRequest } from "./auth";
+import type { FinanceOpsConfig } from "./config";
+import { computePayloadHash, verifyDocumentBytes } from "./intake";
+import type { RateLimiter } from "./rate-limit";
+import { checkFileEnvelope, MAX_FILE_BYTES, parseBillIntake } from "./schema";
 
 /**
  * Framework-free handler for POST /api/integrations/financeops/v1/bill-intakes.
@@ -17,8 +18,10 @@ export type HandlerResponse = { status: number; body: Record<string, unknown>; h
 
 export type HandlerRequest = {
   method: string;
-  /** Path including query string exactly as received; this is what is signed. */
-  pathAndQuery: string;
+  /** Pathname only, exactly as received (percent-encoded); signed. */
+  path: string;
+  /** Raw query string as received (with or without "?"); canonicalised and signed. */
+  query: string;
   headers: { get(name: string): string | null };
   rawBody: Uint8Array;
 };
@@ -43,7 +46,9 @@ export function precheckBillIntake(config: FinanceOpsConfig, method: string, con
   return null;
 }
 
-export async function handleBillIntake(req: HandlerRequest, config: FinanceOpsConfig, nowSeconds?: number): Promise<HandlerResponse> {
+export type HandlerDeps = { nowSeconds?: number; rateLimiter?: RateLimiter };
+
+export async function handleBillIntake(req: HandlerRequest, config: FinanceOpsConfig, deps: HandlerDeps = {}): Promise<HandlerResponse> {
   const early = precheckBillIntake(config, req.method, req.rawBody.byteLength);
   if (early) return early;
 
@@ -53,13 +58,18 @@ export async function handleBillIntake(req: HandlerRequest, config: FinanceOpsCo
     timestamp: req.headers.get(FINANCEOPS_HEADERS.timestamp),
     signature: req.headers.get(FINANCEOPS_HEADERS.signature),
     method: req.method,
-    path: req.pathAndQuery,
+    path: req.path,
+    query: req.query,
     rawBody: req.rawBody,
     keys: config.keys,
-    nowSeconds,
+    nowSeconds: deps.nowSeconds,
     maxSkewSeconds: config.maxSkewSeconds,
   });
   if (!auth.ok) return respond(401, { error: "unauthorized" });
+
+  // Best-effort per-key rate limit, only for authenticated callers (see rate-limit.ts).
+  const limited = deps.rateLimiter?.check(auth.keyId);
+  if (limited && !limited.allowed) return respond(429, { error: "rate_limited" }, { "Retry-After": String(limited.retryAfterSeconds) });
 
   // 2. Parse the multipart envelope: exactly `metadata` (JSON text) and `file`.
   const contentType = req.headers.get("content-type") ?? "";
@@ -91,8 +101,10 @@ export async function handleBillIntake(req: HandlerRequest, config: FinanceOpsCo
   if (!parsed.ok) return respond(422, { error: "validation_failed", issues: parsed.issues });
   const intake = parsed.value;
 
-  // 4. Entity allow-list. An uncertain (null) entity is allowed through to human review, never guessed.
-  if (intake.entity_code !== null && !config.allowedEntities.includes(intake.entity_code)) {
+  // 4. Per-key entity allow-list (a subset of the integration ceiling). An uncertain (null) entity is
+  //    accepted as an INTAKE for human review, but must never become a supplier bill and is never guessed.
+  const allowedForKey = config.keyEntities[auth.keyId] ?? [];
+  if (intake.entity_code !== null && !allowedForKey.includes(intake.entity_code)) {
     return respond(403, { error: "entity_not_permitted", intake_id: intake.intake_id });
   }
 

@@ -3,8 +3,12 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 /**
  * FinanceOps -> Hub request authentication (HMAC-SHA256).
  *
- * Signing string (UTF-8, "\n" separated):
- *   {unix_timestamp_seconds}\n{METHOD}\n{path_and_query}\n{sha256_hex(raw_body)}
+ * Signing string (UTF-8, five lines separated by "\n"):
+ *   {unix_timestamp_seconds}
+ *   {METHOD}
+ *   {canonical_path}            pathname exactly as sent (already percent-encoded), no query
+ *   {canonical_query_string}    see canonicalizeQuery(); empty line when there is no query
+ *   {sha256_hex(raw_body)}      lower-case hex; hash of the empty string when there is no body
  * Header:  X-FinanceOps-Signature: v1=<hex(HMAC_SHA256(secret, signing_string))>
  *
  * This module is pure: it never reads the environment on its own, never logs and
@@ -35,6 +39,7 @@ export type VerifyFailureReason =
   | "unsupported_version"
   | "malformed_signature"
   | "malformed_timestamp"
+  | "malformed_query"
   | "timestamp_expired"
   | "timestamp_in_future"
   | "unknown_key"
@@ -47,17 +52,62 @@ export type VerifyResult =
 export type SigningParts = {
   timestamp: string;
   method: string;
-  /** Path including the query string, exactly as sent (e.g. "/api/x/y?a=1"). */
+  /** Pathname only, exactly as sent (e.g. "/api/x/y"); never includes "?". */
   path: string;
+  /** Raw query string as sent, with or without the leading "?"; "" when none. */
+  query: string;
   bodySha256: string;
 };
+
+function decodeComponent(text: string): string | null {
+  try {
+    return decodeURIComponent(text.replace(/\+/g, " "));
+  } catch {
+    return null;
+  }
+}
+
+function encodeComponent(text: string): string {
+  // RFC 3986 unreserved set only; everything else is percent-encoded with upper-case hex.
+  return encodeURIComponent(text).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
+/**
+ * Canonical query string used in the signature.
+ *  - leading "?" ignored; empty pairs ("a=1&&b=2") ignored; "" when no pairs
+ *  - each key and value is percent-decoded ("+" means space, as in form encoding; a literal
+ *    plus must be sent as %2B), then re-encoded with the RFC 3986 unreserved set and
+ *    upper-case hex, so %2f / %2F / "/"-style variants of the same value are equivalent
+ *  - "a" and "a=" are equivalent (value ""); duplicate keys are kept (never merged)
+ *  - pairs are sorted by encoded key, then encoded value (plain code-unit order), so the
+ *    result does not depend on the order the client happened to send them
+ * Returns null for malformed percent-encoding (the request must then fail verification).
+ */
+export function canonicalizeQuery(rawQuery: string): string | null {
+  const q = rawQuery.startsWith("?") ? rawQuery.slice(1) : rawQuery;
+  if (q === "") return "";
+  const pairs: Array<[string, string]> = [];
+  for (const part of q.split("&")) {
+    if (part === "") continue;
+    const eq = part.indexOf("=");
+    const key = decodeComponent(eq === -1 ? part : part.slice(0, eq));
+    const value = decodeComponent(eq === -1 ? "" : part.slice(eq + 1));
+    if (key === null || value === null) return null;
+    pairs.push([encodeComponent(key), encodeComponent(value)]);
+  }
+  pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  return pairs.map(([k, v]) => k + "=" + v).join("&");
+}
 
 export function sha256Hex(data: Uint8Array | string): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/** Throws on a malformed query string; verifyRequest turns that into a failed verification. */
 export function buildSigningString(parts: SigningParts): string {
-  return [parts.timestamp, parts.method.toUpperCase(), parts.path, parts.bodySha256.toLowerCase()].join("\n");
+  const query = canonicalizeQuery(parts.query);
+  if (query === null) throw new Error("malformed query string");
+  return [parts.timestamp, parts.method.toUpperCase(), parts.path, query, parts.bodySha256.toLowerCase()].join("\n");
 }
 
 export function signRequest(secret: string, parts: SigningParts): string {
@@ -81,7 +131,10 @@ export type VerifyInput = {
   timestamp: string | null | undefined;
   signature: string | null | undefined;
   method: string;
+  /** Pathname only (no query). */
   path: string;
+  /** Raw query string as received ("" or "?a=1&b=2" or "a=1&b=2"). */
+  query: string;
   rawBody: Uint8Array;
   keys: readonly FinanceOpsKey[];
   /** Current time as unix seconds; injectable for tests. */
@@ -106,13 +159,15 @@ export function verifyRequest(input: VerifyInput): VerifyResult {
   if (ts < now - skew) return { ok: false, reason: "timestamp_expired" };
   if (ts > now + skew) return { ok: false, reason: "timestamp_in_future" };
 
+  if (canonicalizeQuery(input.query) === null) return { ok: false, reason: "malformed_query" };
+
   const candidates = input.keys.filter((k) => k.keyId === keyId);
   if (candidates.length === 0) return { ok: false, reason: "unknown_key" };
 
   const bodySha256 = sha256Hex(input.rawBody);
   let matched: FinanceOpsKey | null = null;
   for (const key of candidates) {
-    const expected = signRequest(key.secret, { timestamp, method: input.method, path: input.path, bodySha256 });
+    const expected = signRequest(key.secret, { timestamp, method: input.method, path: input.path, query: input.query, bodySha256 });
     // Evaluate every candidate so timing does not reveal which slot matched.
     if (safeEqualHex(expected.slice(SIGNATURE_VERSION.length + 1), provided) && !matched) matched = key;
   }

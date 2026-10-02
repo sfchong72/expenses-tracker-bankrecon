@@ -1,6 +1,6 @@
-import { sha256Hex } from "./auth.ts";
-import type { CategoryMatch, SupplierMatch } from "./supplier-match.ts";
-import type { AllowedMime, EntityCode, FinanceOpsBillIntake } from "./schema.ts";
+import { sha256Hex } from "./auth";
+import type { CategoryMatch, SupplierMatch } from "./supplier-match";
+import type { AllowedMime, EntityCode, FinanceOpsBillIntake } from "./schema";
 
 /**
  * Pure helpers that turn a validated intake into a *proposal* for a DRAFT supplier bill,
@@ -173,4 +173,4 @@ export function buildDraftBillProposal(intake: FinanceOpsBillIntake, supplier: S
 }
 
 // Human-verification rules live in ./verification.ts (no Node imports) so client components can use them.
-export { VERIFY_BLOCKING_FLAGS, canVerifyIntake, verificationBlockers, type VerificationState } from "./verification.ts";
+export { VERIFY_BLOCKING_FLAGS, canVerifyIntake, verificationBlockers, type VerificationState } from "./verification";

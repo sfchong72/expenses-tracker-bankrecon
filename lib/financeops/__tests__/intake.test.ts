@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { sha256Hex } from "../auth.ts";
-import { buildDraftBillProposal, canVerifyIntake, canonicalJson, computePayloadHash, sniffMime, verificationBlockers, verifyDocumentBytes, type VerificationState } from "../intake.ts";
-import { parseBillIntake, type FinanceOpsBillIntake } from "../schema.ts";
-import type { CategoryMatch, SupplierMatch } from "../supplier-match.ts";
+import { sha256Hex } from "../auth";
+import { buildDraftBillProposal, canVerifyIntake, canonicalJson, computePayloadHash, sniffMime, verificationBlockers, verifyDocumentBytes, type VerificationState } from "../intake";
+import { parseBillIntake, type FinanceOpsBillIntake } from "../schema";
+import type { CategoryMatch, SupplierMatch } from "../supplier-match";
 
 const PDF = new TextEncoder().encode("%PDF-1.7\nfake");
 const PDF_SHA = sha256Hex(PDF);

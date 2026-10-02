@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { sha256Hex, signRequest } from "../auth.ts";
-import { readFinanceOpsConfig, type FinanceOpsConfig } from "../config.ts";
-import { handleBillIntake, MAX_REQUEST_BYTES } from "../handler.ts";
+import { sha256Hex, signRequest } from "../auth";
+import { readFinanceOpsConfig, type FinanceOpsConfig } from "../config";
+import { handleBillIntake, MAX_REQUEST_BYTES, type HandlerDeps } from "../handler";
+import { createRateLimiter } from "../rate-limit";
 
 const SECRET_CURRENT = "test-secret-current-0123456789abcdef0123";
 const SECRET_NEXT = "test-secret-next-0123456789abcdef012345";
@@ -13,13 +14,15 @@ const PDF = new TextEncoder().encode("%PDF-1.7\nfake invoice");
 
 const ENV = {
   FINANCEOPS_INTAKE_ENABLED: "true",
-  FINANCEOPS_ALLOWED_ENTITY_CODES: "IEA, plc ,bogus",
+  FINANCEOPS_ALLOWED_ENTITY_CODES: "IEA, plc ,bogus,KALER",
+  FINANCEOPS_ALLOWED_ENTITY_CODES_NEXT: "PLC,IEA,IETA",
   FINANCEOPS_HMAC_KEY_ID_CURRENT: "kid-current",
   FINANCEOPS_HMAC_SECRET_CURRENT: SECRET_CURRENT,
   FINANCEOPS_HMAC_KEY_ID_NEXT: "kid-next",
   FINANCEOPS_HMAC_SECRET_NEXT: SECRET_NEXT,
 };
 const CONFIG: FinanceOpsConfig = readFinanceOpsConfig(ENV);
+const DEPS: HandlerDeps = { nowSeconds: NOW };
 
 function metadata(over: Record<string, unknown> = {}, bytes: Uint8Array = PDF) {
   return {
@@ -34,7 +37,9 @@ function metadata(over: Record<string, unknown> = {}, bytes: Uint8Array = PDF) {
   };
 }
 
-async function multipart(meta: unknown, file: { bytes: Uint8Array; type: string } | null = { bytes: PDF, type: "application/pdf" }, extra: Record<string, string> = {}) {
+type Parts = { raw: Uint8Array; contentType: string };
+
+async function multipart(meta: unknown, file: { bytes: Uint8Array; type: string } | null = { bytes: PDF, type: "application/pdf" }, extra: Record<string, string> = {}): Promise<Parts> {
   const fd = new FormData();
   fd.set("metadata", typeof meta === "string" ? meta : JSON.stringify(meta));
   if (file) fd.set("file", new File([file.bytes as BlobPart], "a.pdf", { type: file.type }));
@@ -43,30 +48,46 @@ async function multipart(meta: unknown, file: { bytes: Uint8Array; type: string 
   return { raw: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get("content-type") as string };
 }
 
-function request(parts: { raw: Uint8Array; contentType: string }, over: { secret?: string; keyId?: string; path?: string; sign?: boolean; timestamp?: string } = {}) {
+type Over = { secret?: string; keyId?: string; signPath?: string; signQuery?: string; sign?: boolean; timestamp?: string; method?: string; path?: string; query?: string };
+
+function request(parts: Parts, over: Over = {}) {
   const timestamp = over.timestamp ?? String(NOW);
+  const method = over.method ?? "POST";
   const headers = new Headers({ "content-type": parts.contentType });
   if (over.sign !== false) {
     headers.set("x-financeops-key-id", over.keyId ?? "kid-current");
     headers.set("x-financeops-timestamp", timestamp);
-    headers.set("x-financeops-signature", signRequest(over.secret ?? SECRET_CURRENT, { timestamp, method: "POST", path: over.path ?? PATH, bodySha256: sha256Hex(parts.raw) }));
+    headers.set(
+      "x-financeops-signature",
+      signRequest(over.secret ?? SECRET_CURRENT, { timestamp, method, path: over.signPath ?? PATH, query: over.signQuery ?? "", bodySha256: sha256Hex(parts.raw) }),
+    );
   }
-  return { method: "POST", pathAndQuery: PATH, headers, rawBody: parts.raw };
+  return { method, path: over.path ?? PATH, query: over.query ?? "", headers, rawBody: parts.raw };
 }
 
-async function run(parts: { raw: Uint8Array; contentType: string }, over: Parameters<typeof request>[1] = {}, config: FinanceOpsConfig = CONFIG) {
-  return handleBillIntake(request(parts, over), config, NOW);
+async function run(parts: Parts, over: Over = {}, config: FinanceOpsConfig = CONFIG, deps: HandlerDeps = DEPS) {
+  return handleBillIntake(request(parts, over), config, deps);
 }
 
 describe("config", () => {
   it("is disabled, keyless and entity-less by default", () => {
-    assert.deepEqual(readFinanceOpsConfig({}), { enabled: false, keys: [], allowedEntities: [], maxSkewSeconds: 300 });
+    assert.deepEqual(readFinanceOpsConfig({}), { enabled: false, keys: [], allowedEntities: [], keyEntities: {}, maxSkewSeconds: 300, rateLimitPerMinute: 30 });
   });
-  it("parses and sanitises the entity allow-list", () => {
-    assert.deepEqual(CONFIG.allowedEntities, ["IEA", "PLC"]);
+
+  it("parses and sanitises the entity ceiling", () => {
+    assert.deepEqual(CONFIG.allowedEntities, ["IEA", "PLC", "KALER"]);
     assert.equal(readFinanceOpsConfig({ ...ENV, FINANCEOPS_INTAKE_ENABLED: "TRUE" }).enabled, false);
     assert.equal(readFinanceOpsConfig({ ...ENV, FINANCEOPS_MAX_SKEW_SECONDS: "5" }).maxSkewSeconds, 300);
     assert.equal(readFinanceOpsConfig({ ...ENV, FINANCEOPS_MAX_SKEW_SECONDS: "60" }).maxSkewSeconds, 60);
+    assert.equal(readFinanceOpsConfig({ ...ENV, FINANCEOPS_RATE_LIMIT_PER_MINUTE: "0" }).rateLimitPerMinute, 30);
+    assert.equal(readFinanceOpsConfig({ ...ENV, FINANCEOPS_RATE_LIMIT_PER_MINUTE: "5" }).rateLimitPerMinute, 5);
+  });
+
+  it("per-key entity lists narrow but never widen the ceiling", () => {
+    assert.deepEqual(CONFIG.keyEntities["kid-current"], ["IEA", "PLC", "KALER"]); // unset -> ceiling
+    assert.deepEqual(CONFIG.keyEntities["kid-next"], ["PLC", "IEA"]); // IETA is outside the ceiling and is dropped
+    const empty = readFinanceOpsConfig({ ...ENV, FINANCEOPS_ALLOWED_ENTITY_CODES_CURRENT: "IETA" });
+    assert.deepEqual(empty.keyEntities["kid-current"], []);
   });
 });
 
@@ -78,19 +99,54 @@ describe("bill-intakes handler (prep state)", () => {
     assert.equal((await run(parts, {}, { ...CONFIG, allowedEntities: [] })).body.error, "integration_not_configured");
   });
 
-  it("rejects missing, wrong-key, wrong-secret, tampered-path and stale requests with an opaque 401", async () => {
+  it("rejects a missing signature with an opaque 401", async () => {
+    const r = await run(await multipart(metadata()), { sign: false });
+    assert.equal(r.status, 401);
+    assert.deepEqual(r.body, { error: "unauthorized" });
+  });
+
+  it("rejects wrong-key, wrong-secret and stale requests with the same opaque 401", async () => {
     const parts = await multipart(metadata());
     const results = [
-      await run(parts, { sign: false }),
       await run(parts, { keyId: "nope" }),
       await run(parts, { secret: "another-secret-0123456789abcdef012345" }),
-      await run(parts, { path: "/api/integrations/financeops/v1/other" }),
       await run(parts, { timestamp: String(NOW - 3600) }),
     ];
     for (const r of results) {
       assert.equal(r.status, 401);
       assert.deepEqual(r.body, { error: "unauthorized" });
     }
+  });
+
+  it("rejects a valid signature that was minted for a different path", async () => {
+    const parts = await multipart(metadata());
+    for (const signPath of ["/api/integrations/financeops/v1/payment-evidences", "/api/integrations/financeops/v1/bill-intakes/", "/api/admin/users/create"]) {
+      const r = await run(parts, { signPath });
+      assert.equal(r.status, 401, signPath);
+      assert.deepEqual(r.body, { error: "unauthorized" });
+    }
+    // and the converse: signed for the real path but delivered to another one
+    assert.equal((await run(parts, { path: "/api/integrations/financeops/v1/payment-evidences" })).status, 401);
+  });
+
+  it("covers the query string: tampered, added or removed parameters fail with 401", async () => {
+    const parts = await multipart(metadata());
+    assert.equal((await run(parts, { signQuery: "?a=1&b=2", query: "?b=2&a=1" })).status, 503); // reordered equivalent: authenticated
+    assert.equal((await run(parts, { signQuery: "?a=1", query: "?a=2" })).status, 401);
+    assert.equal((await run(parts, { signQuery: "?a=1", query: "?a=1&b=2" })).status, 401);
+    assert.equal((await run(parts, { signQuery: "?a=1&b=2", query: "?a=1" })).status, 401);
+    assert.equal((await run(parts, { signQuery: "", query: "?entity_code=KALER" })).status, 401);
+  });
+
+  it("rejects unexpected HTTP methods", async () => {
+    const parts = await multipart(metadata());
+    for (const method of ["GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) {
+      const r = await run(parts, { method });
+      assert.equal(r.status, 405, method);
+      assert.equal(r.headers?.Allow, "POST");
+    }
+    // a POST signature cannot be replayed as another method either
+    assert.equal(request(parts, { method: "POST" }).method, "POST");
   });
 
   it("authenticates with either current or next key", async () => {
@@ -110,23 +166,28 @@ describe("bill-intakes handler (prep state)", () => {
     assert.equal(r.headers?.["Cache-Control"], "no-store");
   });
 
-  it("accepts an uncertain (null) entity and leaves it for human review", async () => {
+  it("accepts an uncertain (null) entity as an intake for human review, never a bill", async () => {
     const r = await run(await multipart(metadata({ entity_code: null })));
     assert.equal(r.body.error, "intake_persistence_not_ready");
     assert.equal(r.body.entity_code, null);
   });
 
-  it("rejects forbidden and unknown fields with 422 and no echoed values", async () => {
+  it("rejects prohibited and unknown fields with 422 and no echoed values", async () => {
     const r = await run(await multipart(metadata({ payment_status: "paid", surprise: "secret-value-123" })));
     assert.equal(r.status, 422);
     assert.equal(r.body.error, "validation_failed");
+    const issues = r.body.issues as Array<{ path: string; code: string }>;
+    assert.deepEqual(issues.map((i) => `${i.path}:${i.code}`).sort(), ["payment_status:forbidden_field", "surprise:unknown_field"]);
     assert.ok(!JSON.stringify(r.body).includes("secret-value-123"));
-    assert.ok(!JSON.stringify(r.body).includes("paid"));
   });
 
-  it("enforces the entity allow-list", async () => {
-    assert.equal((await run(await multipart(metadata({ entity_code: "KALER" })))).status, 403);
-    assert.equal((await run(await multipart(metadata({ entity_code: "PLC" })))).status, 503);
+  it("enforces the per-key entity allow-list", async () => {
+    const kaler = await multipart(metadata({ entity_code: "KALER" }));
+    assert.equal((await run(kaler)).status, 503); // current key: ceiling includes KALER
+    const viaNext = await run(kaler, { keyId: "kid-next", secret: SECRET_NEXT });
+    assert.equal(viaNext.status, 403); // next key is narrowed to PLC,IEA
+    assert.equal(viaNext.body.error, "entity_not_permitted");
+    assert.equal((await run(await multipart(metadata({ entity_code: "IETA" })))).status, 403); // outside the ceiling
   });
 
   it("requires multipart with exactly one metadata and one file part", async () => {
@@ -146,7 +207,7 @@ describe("bill-intakes handler (prep state)", () => {
 
   it("rejects oversized request bodies before parsing", async () => {
     const raw = new Uint8Array(MAX_REQUEST_BYTES + 1);
-    const r = await handleBillIntake({ method: "POST", pathAndQuery: PATH, headers: new Headers(), rawBody: raw }, CONFIG, NOW);
+    const r = await handleBillIntake({ method: "POST", path: PATH, query: "", headers: new Headers(), rawBody: raw }, CONFIG, DEPS);
     assert.equal(r.status, 413);
   });
 
@@ -159,15 +220,41 @@ describe("bill-intakes handler (prep state)", () => {
     assert.equal(r.body.error, "document_hash_mismatch");
   });
 
+  it("rate-limits per authenticated key only, with Retry-After", async () => {
+    const limiter = createRateLimiter(2);
+    const deps: HandlerDeps = { nowSeconds: NOW, rateLimiter: limiter };
+    const parts = await multipart(metadata());
+    assert.equal((await run(parts, {}, CONFIG, deps)).status, 503);
+    assert.equal((await run(parts, {}, CONFIG, deps)).status, 503);
+    const limited = await run(parts, {}, CONFIG, deps);
+    assert.equal(limited.status, 429);
+    assert.equal(limited.body.error, "rate_limited");
+    assert.match(String(limited.headers?.["Retry-After"]), /^\d+$/);
+    // another key has its own budget, and unauthenticated calls never consume anyone's budget
+    assert.equal((await run(parts, { keyId: "kid-next", secret: SECRET_NEXT }, CONFIG, deps)).status, 503);
+    for (let i = 0; i < 5; i++) assert.equal((await run(parts, { sign: false }, CONFIG, deps)).status, 401);
+  });
+
   it("never returns secret material", async () => {
     const out = JSON.stringify([await run(await multipart(metadata())), await run(await multipart(metadata()), { sign: false })]);
     assert.ok(!out.includes(SECRET_CURRENT) && !out.includes(SECRET_NEXT));
   });
 
   it("has no database, storage or service-role access in the prep-state files", () => {
-    for (const file of ["../handler.ts", "../config.ts", "../../../app/api/integrations/financeops/v1/bill-intakes/route.ts"]) {
+    for (const file of ["../handler.ts", "../config.ts", "../rate-limit.ts", "../../../app/api/integrations/financeops/v1/bill-intakes/route.ts"]) {
       const src = readFileSync(new URL(file, import.meta.url), "utf8");
       assert.ok(!/supabase|createClient|SERVICE_ROLE|\.from\(\s*["'`]|\.rpc\(|\.storage\b/i.test(src), file);
     }
+  });
+});
+
+describe("rate limiter", () => {
+  it("allows up to the limit per window, then recovers", () => {
+    const rl = createRateLimiter(2, 1000);
+    assert.deepEqual(rl.check("k", 0), { allowed: true });
+    assert.deepEqual(rl.check("k", 100), { allowed: true });
+    assert.deepEqual(rl.check("k", 200), { allowed: false, retryAfterSeconds: 1 });
+    assert.deepEqual(rl.check("other", 200), { allowed: true });
+    assert.deepEqual(rl.check("k", 1001), { allowed: true });
   });
 });

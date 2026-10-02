@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { matchCategory, matchSupplier, normalizeName, type SafeSupplier } from "../supplier-match.ts";
+import { matchCategory, matchSupplier, normalizeName, type SafeSupplier } from "../supplier-match";
 
 const suppliers: SafeSupplier[] = [
   { id: "s1", supplierName: "Mega Supplies Sdn. Bhd.", registrationNumber: "201901012345 (1234567-X)", activeStatus: true },

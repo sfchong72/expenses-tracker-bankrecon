@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { checkFileEnvelope, isForbiddenKey, MAX_FILE_BYTES, parseBillIntake } from "../schema.ts";
+import { checkFileEnvelope, isProhibitedField, MAX_FILE_BYTES, parseBillIntake, PROHIBITED_FIELDS } from "../schema";
 
 const SHA = "a".repeat(64);
 
@@ -61,56 +61,47 @@ describe("bill intake schema", () => {
     }
   });
 
-  it("rejects a forbidden status field", () => {
-    for (const key of ["payment_status", "status", "supporting_document_status"]) {
-      const v = valid();
-      (v.invoice as Record<string, unknown>)[key] = "paid";
-      assert.ok(codes(v).includes(`invoice.${key}:forbidden_field`), key);
-    }
-    const top = { ...valid(), payment_status: "unpaid" };
-    assert.ok(codes(top).includes("payment_status:forbidden_field"));
-  });
-
-  it("rejects forbidden approval fields", () => {
-    for (const key of ["approved", "approved_by", "approvalState", "is_approved"]) {
-      assert.ok(codes({ ...valid(), [key]: true }).includes(`${key}:forbidden_field`), key);
-    }
-  });
-
-  it("rejects forbidden paid / payment fields", () => {
-    for (const key of ["paid", "paid_at", "payment_reference", "payment_date", "payments"]) {
-      assert.ok(codes({ ...valid(), [key]: "x" }).includes(`${key}:forbidden_field`), key);
+  it("rejects explicitly prohibited fields at the top level and in every nested object", () => {
+    const targets: Array<[string, (v: Record<string, unknown>) => Record<string, unknown>]> = [
+      ["", (v) => v],
+      ["source.", (v) => v.source as Record<string, unknown>],
+      ["supplier.", (v) => v.supplier as Record<string, unknown>],
+      ["invoice.", (v) => v.invoice as Record<string, unknown>],
+      ["category_hint.", (v) => v.category_hint as Record<string, unknown>],
+      ["extraction.", (v) => v.extraction as Record<string, unknown>],
+      ["document.", (v) => v.document as Record<string, unknown>],
+    ];
+    for (const key of ["payment_status", "created_by", "approved_by", "approved_at", "paid_at", "bank_transaction_id", "reconciliation_date", "sql_document_id", "sql_posted_at", "supplier_id", "entity_id", "bill_id", "document_id", "status", "supporting_document_status", "verified_by", "outstanding_amount", "data_origin"]) {
+      for (const [prefix, pick] of targets) {
+        const v = valid();
+        pick(v)[key] = "x";
+        assert.ok(codes(v).includes(`${prefix}${key}:forbidden_field`), `${prefix}${key}`);
+      }
     }
   });
 
-  it("rejects forbidden bank fields", () => {
-    for (const key of ["bank_account", "bank_transaction_id", "bankName"]) {
-      assert.ok(codes({ ...valid(), [key]: "x" }).includes(`${key}:forbidden_field`), key);
-    }
-    const nested = valid();
-    (nested.supplier as Record<string, unknown>).bank_details = { acc: "1" };
-    assert.ok(codes(nested).includes("supplier.bank_details:forbidden_field"));
-  });
-
-  it("rejects forbidden reconciliation and SQL fields", () => {
-    for (const key of ["reconciled", "reconciliation_id", "sql_posted", "sql_account_ref", "sqlDocNo"]) {
-      assert.ok(codes({ ...valid(), [key]: "x" }).includes(`${key}:forbidden_field`), key);
-    }
-  });
-
-  it("rejects verification, ownership and authoritative-id fields", () => {
-    for (const key of ["verified", "verified_by", "created_by", "uploaded_by", "supplier_id", "entity_id", "bill_id", "document_id"]) {
-      assert.ok(codes({ ...valid(), [key]: "x" }).includes(`${key}:forbidden_field`), key);
-    }
-    const nested = valid();
-    (nested.supplier as Record<string, unknown>).supplier_id = "00000000-0000-0000-0000-000000000000";
-    assert.ok(codes(nested).includes("supplier.supplier_id:forbidden_field"));
-  });
-
-  it("rejects forbidden keys hidden inside extraction.fields", () => {
+  it("rejects prohibited fields smuggled into extraction.fields", () => {
     const v = valid();
     (v.extraction as { fields: Record<string, unknown> }).fields.payment_status = { value: "paid", confidence: 1 };
     assert.ok(codes(v).includes("extraction.fields.payment_status:forbidden_field"));
+  });
+
+  it("covers the required sensitive field list exactly", () => {
+    for (const key of ["payment_status", "created_by", "approved_by", "approved_at", "paid_at", "bank_transaction_id", "reconciliation_date", "sql_document_id", "sql_posted_at"]) {
+      assert.ok(PROHIBITED_FIELDS.has(key), key);
+    }
+  });
+
+  it("does not use substring or token matching: near-miss names are unknown_field, not forbidden", () => {
+    for (const key of ["bank_note", "sql_hint", "payments", "approval", "is_approved", "paid", "reconciled", "bankName", "Payment_Status", "payment_status ", "status_text"]) {
+      const c = codes({ ...valid(), [key]: "x" });
+      assert.deepEqual(c, [`${key}:unknown_field`], key);
+      assert.equal(isProhibitedField(key), false, key);
+    }
+  });
+
+  it("still fails closed: every unknown key is rejected, however innocuous", () => {
+    for (const key of ["colour", "bank", "sql", "status_flag", "x"]) assert.ok(codes({ ...valid(), [key]: 1 }).length > 0, key);
   });
 
   it("rejects invalid entity codes (no guessing)", () => {
@@ -190,10 +181,12 @@ describe("bill intake schema", () => {
     assert.equal(r.ok && r.value.document.sha256, "a".repeat(64));
   });
 
-  it("isForbiddenKey does not over-block legitimate keys", () => {
-    for (const key of ["intake_id", "entity_code", "invoice", "total_amount", "description", "chat_id", "file_unique_id", "sender_ref", "overall_confidence"]) {
-      assert.equal(isForbiddenKey(key), false, key);
-    }
+  it("every allowlisted field is accepted (nothing legitimate is blocked by the prohibited list)", () => {
+    const allowed = ["intake_id", "source", "entity_code", "supplier", "invoice", "category_hint", "extraction", "document", "notes", "chat_id", "message_id", "file_id", "file_unique_id", "received_at", "sender_ref", "registration_number", "total_amount", "tax_amount", "subtotal", "due_date", "description", "overall_confidence", "filename", "sha256", "mime_type", "bill_type", "currency", "number", "date", "name", "agent", "version", "fields", "channel"];
+    for (const key of allowed) assert.equal(isProhibitedField(key), false, key);
+    const full = valid();
+    (full.extraction as { fields: Record<string, unknown> }).fields = Object.fromEntries(["entity", "supplier_name", "supplier_registration_number", "invoice_number", "invoice_date", "due_date", "currency", "subtotal", "tax_amount", "total_amount", "description", "category"].map((k) => [k, { value: null, confidence: 0.9 }]));
+    assert.equal(parseBillIntake(full).ok, true);
   });
 });
 

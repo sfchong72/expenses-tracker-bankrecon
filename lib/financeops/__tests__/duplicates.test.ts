@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { classifyDuplicates, normalizeInvoiceNumber, type DuplicateCandidate, type ExistingBill, type ExistingDocumentLink } from "../duplicates.ts";
+import { classifyDuplicates, normalizeInvoiceNumber, type DuplicateCandidate, type ExistingBill, type ExistingDocumentLink } from "../duplicates";
 
 const SHA = "b".repeat(64);
 const ENTITY = "entity-iea";
