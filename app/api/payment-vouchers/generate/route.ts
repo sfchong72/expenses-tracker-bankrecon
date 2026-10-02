@@ -8,6 +8,7 @@ export async function POST(request: Request) {
   const { billId } = await request.json();
   const bill = await supabase.from("supplier_bills").select("*").eq("id", billId).maybeSingle();
   if (bill.error || !bill.data) return NextResponse.json({ error: "Bill not found" }, { status: 404 });
+  if (bill.data.payment_status === "draft") return NextResponse.json({ error: "Draft bills must be verified before payment voucher creation" }, { status: 409 });
   const existing = await supabase.from("payment_voucher_items").select("payment_voucher_id, payment_vouchers(status, voucher_number)").eq("supplier_bill_id", billId).limit(1);
   if (existing.data?.length) return NextResponse.json({ error: "A voucher already exists for this bill" }, { status: 409 });
   const supplier = bill.data.supplier_id ? await supabase.from("suppliers").select("supplier_name").eq("id", bill.data.supplier_id).maybeSingle() : { data: null };
