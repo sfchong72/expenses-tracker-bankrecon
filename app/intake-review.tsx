@@ -5,16 +5,15 @@ import { ActionGroup, FieldValue, StatusBadge } from "@/app/ui-v2";
 import { canVerifyIntake, verificationBlockers, type VerificationState } from "@/lib/financeops/verification";
 
 /**
- * FinanceOps Intake Review - UI SHELL (Phase 1 prep).
+ * FinanceOps Intake Review panel (presentational).
  *
- * Presentational only: it receives data and callbacks as props, performs no database or
- * network calls, and persists nothing. It is NOT mounted anywhere yet. The real data source
- * (the finance_intake_submissions table) needs a future migration, so the shell stays disabled
- * until `enabled` is passed by a wired container. Never fake verification by writing these
- * values into existing bill fields.
+ * Receives data and callbacks as props and performs no database or network calls; the container
+ * (app/finance-intake-workspace.tsx) owns persistence against finance_intake_submissions (migration 0023).
  *
- * Verified != approved for payment. Verification only confirms the extracted data matches the
- * original document. Releasing a draft bill to Unpaid is a separate Finance Staff-or-higher action.
+ * "Data Verified" is the intake-level human check: the extracted data matches the original document.
+ * It is NOT payment approval. Releasing the draft Supplier Bill to Unpaid is the separate Stage 1B
+ * "Verify & Mark Ready for Payment" action (Finance Staff or above), which also requires Data Verified
+ * for FinanceOps-origin bills.
  */
 
 export type IntakeFlag = string;
@@ -142,13 +141,17 @@ export type IntakeReviewPanelProps = {
   actorUserId: string | null;
   onVerify?: () => void;
   onReject?: () => void;
+  /** Statuses the current user may move this intake to (see allowedReviewTargets). When given, buttons outside it are disabled. */
+  allowedTargets?: readonly string[];
+  /** Extra review actions rendered beside the main buttons (flag, return to pending). */
+  extraActions?: ReactNode;
   onSelectSupplier?: (supplierId: string) => void;
   onOpenBill?: (billId: string) => void;
   /** Rendered between the fields and the actions, e.g. the existing bill edit form. */
   children?: ReactNode;
 };
 
-export function IntakeReviewPanel({ item, actorUserId, onVerify, onReject, onSelectSupplier, onOpenBill, children }: IntakeReviewPanelProps) {
+export function IntakeReviewPanel({ item, actorUserId, onVerify, onReject, allowedTargets, extraActions, onSelectSupplier, onOpenBill, children }: IntakeReviewPanelProps) {
   const [confirmed, setConfirmed] = useState({ dueDate: false, amount: false, supplier: false, entity: false });
   const [duplicatesAcknowledged, setDuplicatesAcknowledged] = useState(false);
 
@@ -158,6 +161,8 @@ export function IntakeReviewPanel({ item, actorUserId, onVerify, onReject, onSel
   );
   const mayVerify = canVerifyIntake(actorUserId, item.createdByUserId);
   const hasDuplicateFlags = item.duplicates.length > 0;
+  const mayDataVerify = mayVerify && (allowedTargets ? allowedTargets.includes("data_verified") : true);
+  const mayReject = allowedTargets ? allowedTargets.includes("rejected") : true;
 
   return (
     <section className="panel" aria-label={`Intake ${item.intakeId}`}>
@@ -165,7 +170,7 @@ export function IntakeReviewPanel({ item, actorUserId, onVerify, onReject, onSel
         Review FinanceOps intake <StatusBadge status="draft" label="Draft - unverified" />
       </h2>
       <p className="help">
-        Received {item.receivedAt} - Entity {item.entityCode ?? "UNCERTAIN"}. Verifying confirms the data matches the original document. It does not approve payment.
+        Received {item.receivedAt} - Entity {item.entityCode ?? "UNCERTAIN"}. Data Verified confirms the data matches the original document. It does not approve payment.
       </p>
       <div className="grid">
         <div>
@@ -195,15 +200,16 @@ export function IntakeReviewPanel({ item, actorUserId, onVerify, onReject, onSel
               <label><input type="checkbox" checked={duplicatesAcknowledged} onChange={(e) => setDuplicatesAcknowledged(e.target.checked)} /> I reviewed the duplicate warnings</label>
             )}
           </fieldset>
-          {!mayVerify && <p className="help">The identity that created this intake cannot verify it. A staff member must review it.</p>}
+          {!mayVerify && <p className="help">The identity that created this intake cannot mark it Data Verified. A staff member must review it.</p>}
           {mayVerify && blockers.length > 0 && (
             <ul className="mini" aria-label="Verification blockers">{blockers.map((b) => <li key={b}>{b}</li>)}</ul>
           )}
           <ActionGroup label="Intake review actions">
-            <button type="button" className="primary" disabled={!mayVerify || blockers.length > 0 || !onVerify} onClick={onVerify}>Mark verified</button>
-            <button type="button" className="neutral" disabled={!onReject} onClick={onReject}>Reject intake</button>
+            <button type="button" className="primary" disabled={!mayDataVerify || blockers.length > 0 || !onVerify} onClick={onVerify}>Data Verified</button>
+            <button type="button" className="neutral" disabled={!mayReject || !onReject} onClick={onReject}>Reject intake</button>
+            {extraActions}
           </ActionGroup>
-          <p className="help">After verification a Finance Staff member or above releases the draft to Unpaid. Verified bills are not payable until then.</p>
+          <p className="help">After Data Verified, a Finance Staff member or above uses Verify &amp; Mark Ready for Payment on the bill (draft to unpaid). The bill is not payable until then.</p>
         </div>
       </div>
     </section>
@@ -215,7 +221,7 @@ export function IntakeReviewShell({ enabled = false, items = [], actorUserId = n
     return (
       <section className="panel" aria-label="FinanceOps intake review (disabled)">
         <h2>FinanceOps intake review</h2>
-        <div className="empty">FinanceOps intake is not enabled yet. It requires the Stage 1B release and the approved intake migration.</div>
+        <div className="empty">FinanceOps intake review is not available to your account.</div>
       </section>
     );
   }
