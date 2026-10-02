@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isFinanceOpsIntegrationPath } from "@/lib/financeops/routes";
 
 type CookieToSet = {
   name: string;
@@ -58,6 +59,11 @@ function requiresAal2(pathname: string) {
 
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // FinanceOps machine route: no cookie session exists for it. It is authenticated by HMAC inside
+  // the route handler and is disabled unless explicitly enabled. Only this exact prefix is exempt.
+  if (isFinanceOpsIntegrationPath(pathname)) return NextResponse.next({ request });
+
   const isLogin = pathname === "/login";
   const isMfa = pathname === "/mfa";
   const isAccessDenied = pathname === "/access-denied";
