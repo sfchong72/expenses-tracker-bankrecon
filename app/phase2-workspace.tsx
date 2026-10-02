@@ -132,10 +132,18 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
     if (res.error) setError(res.error.message); else { setMessage(row.active_status ? "Supplier archived." : "Supplier reactivated."); await load(); }
   }
 
+  // Stage 1B RLS (0022) requires created_by = auth.uid() on supplier_bills and bill_payments inserts; the column has no default.
+  async function currentUserId() {
+    const { data } = await db.auth.getUser();
+    return data.user?.id ?? null;
+  }
+
   async function saveBill(e: FormEvent) {
     e.preventDefault(); setError("");
+    const userId = await currentUserId();
+    if (!userId) { setError("Your session has expired. Please sign in again."); return; }
     const total = Number(bill.total_amount || bill.subtotal || 0);
-    const payload = { entity_id: bill.entity_id, supplier_id: bill.supplier_id || null, description: bill.description, bill_number: bill.bill_number || null, bill_type: bill.bill_type, bill_date: bill.bill_date, due_date: bill.due_date, subtotal: Number(bill.subtotal || total), tax_amount: Number(bill.tax_amount || 0), total_amount: total, outstanding_amount: total, payment_status: "draft", expense_category_id: bill.expense_category_id || null, remarks: bill.remarks || null, supporting_document_status: billFiles.length ? "invoice_uploaded" : "no_document", is_demo: false, data_origin: "manual" };
+    const payload = { created_by: userId, entity_id: bill.entity_id, supplier_id: bill.supplier_id || null, description: bill.description, bill_number: bill.bill_number || null, bill_type: bill.bill_type, bill_date: bill.bill_date, due_date: bill.due_date, subtotal: Number(bill.subtotal || total), tax_amount: Number(bill.tax_amount || 0), total_amount: total, outstanding_amount: total, payment_status: "draft", expense_category_id: bill.expense_category_id || null, remarks: bill.remarks || null, supporting_document_status: billFiles.length ? "invoice_uploaded" : "no_document", is_demo: false, data_origin: "manual" };
     const res = await db.from("supplier_bills").insert(payload).select("id").single();
     if (res.error) { setError(res.error.message); return; }
     const ok = await uploadDocs(billFiles, { entity_id: bill.entity_id, linked_record_type: "supplier_bill", linked_record_id: res.data.id, document_type: "supplier_invoice" });
@@ -157,8 +165,10 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
 
   async function savePayment(e: FormEvent) {
     e.preventDefault(); setError("");
+    const userId = await currentUserId();
+    if (!userId) { setError("Your session has expired. Please sign in again."); return; }
     const b = bills.find((x) => x.id === payment.supplier_bill_id);
-    const res = await db.from("bill_payments").insert({ entity_id: b?.entity_id, supplier_bill_id: payment.supplier_bill_id, payment_voucher_id: payment.payment_voucher_id || null, payment_date: payment.payment_date, amount: Number(payment.amount || 0), method: payment.method, payment_reference: payment.payment_reference || null, remarks: payment.remarks || null, is_demo: false, data_origin: "manual" });
+    const res = await db.from("bill_payments").insert({ created_by: userId, entity_id: b?.entity_id, supplier_bill_id: payment.supplier_bill_id, payment_voucher_id: payment.payment_voucher_id || null, payment_date: payment.payment_date, amount: Number(payment.amount || 0), method: payment.method, payment_reference: payment.payment_reference || null, remarks: payment.remarks || null, is_demo: false, data_origin: "manual" });
     if (res.error) setError(res.error.message); else { setPayment({ supplier_bill_id: "", payment_voucher_id: "", amount: "", payment_date: today, method: "bank_transfer", payment_reference: "", remarks: "" }); setMessage("Payment recorded."); await load(); }
   }
 
