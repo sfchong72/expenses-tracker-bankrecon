@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { canVerifyBill } from "@/lib/bill-verification";
+import { canRecordPaymentAgainst, canVerifyBill } from "@/lib/bill-verification";
 import { ActionGroup, DetailDrawer, FieldValue, MoreActions, PageTabs, StatusBadge } from "@/app/ui-v2";
 
 type Row = Record<string, any>;
@@ -193,6 +193,7 @@ export function Phase2Workspace({ mode, billId }: { mode: Mode; billId?: string 
     const userId = await currentUserId();
     if (!userId) { setError("Your session has expired. Please sign in again."); return; }
     const b = bills.find((x) => x.id === payment.supplier_bill_id);
+    if (!b || !canRecordPaymentAgainst(b)) { setError("Choose a verified bill that is not cancelled to record a payment."); return; }
     const res = await db.from("bill_payments").insert({ created_by: userId, entity_id: b?.entity_id, supplier_bill_id: payment.supplier_bill_id, payment_voucher_id: payment.payment_voucher_id || null, payment_date: payment.payment_date, amount: Number(payment.amount || 0), method: payment.method, payment_reference: payment.payment_reference || null, remarks: payment.remarks || null, is_demo: false, data_origin: "manual" });
     if (res.error) setError(res.error.message); else { setPayment({ supplier_bill_id: "", payment_voucher_id: "", amount: "", payment_date: today, method: "bank_transfer", payment_reference: "", remarks: "" }); setMessage("Payment recorded."); await load(); }
   }
@@ -352,7 +353,7 @@ function BillsWorkspaceV21(props: Row) {
       <Panel title="Payment Voucher Draft">
         <p className="form-note">Choose a bill above to prefill the draft, or enter a manual voucher. The voucher remains a draft until issued from Payment Vouchers.</p>
         <VoucherForm voucher={voucher} setVoucher={setVoucher} items={voucherItems} setItems={setVoucherItems} save={onSaveVoucher} entities={entities} suppliers={suppliers.filter((row: Row) => row.active_status)} categories={categories} bills={awaiting} recurring={recurring} bankAccounts={banks} onCancel={() => { setVoucher({ ...emptyVoucher, entity_id: voucher.entity_id }); setVoucherItems([{ ...emptyItem }]); setTab("list"); }} />
-        <details className="advanced-section"><summary>Record an existing bill payment</summary><div className="advanced-section-body"><PaymentForm payment={payment} setPayment={setPayment} save={onSavePayment} bills={bills} vouchers={vouchers} /></div></details>
+        <details className="advanced-section"><summary>Record an existing bill payment</summary><div className="advanced-section-body"><PaymentForm payment={payment} setPayment={setPayment} save={onSavePayment} bills={bills.filter(canRecordPaymentAgainst)} vouchers={vouchers} /></div></details>
       </Panel>
       </div>
     </>}

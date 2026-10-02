@@ -100,8 +100,8 @@ const uiJs = transpile(Object.values(uiFns).join("\n"), "ui-fns.ts");
 function makeUi(o = {}) {
   const seen = { errors: [], messages: [], fetches: [], confirms: [], loads: 0, roleSet: [] };
   const state = {
-    db: o.db, role: o.role ?? null, canVerifyBill: verification.canVerifyBill,
-    bill: o.bill, payment: o.payment, bills: [{ id: "bill-1", entity_id: ENTITY }], billFiles: [], today: "2026-10-02", emptyBill: {},
+    db: o.db, role: o.role ?? null, canVerifyBill: verification.canVerifyBill, canRecordPaymentAgainst: verification.canRecordPaymentAgainst,
+    bill: o.bill, payment: o.payment, bills: o.bills ?? [{ id: "bill-1", entity_id: ENTITY }], billFiles: [], today: "2026-10-02", emptyBill: {},
     setError: (m) => { if (m) seen.errors.push(m); }, setMessage: (m) => seen.messages.push(m), setBill() {}, setBillFiles() {}, setPayment() {}, setRole: (r) => seen.roleSet.push(r),
     load: async () => { seen.loads++; }, uploadDocs: async () => true,
     window: { confirm: (m) => { seen.confirms.push(m); return o.confirm !== false; } },
@@ -418,4 +418,103 @@ test("loadRole reads the role of the authenticated user only", async () => {
   await ui.fns.loadRole();
   assert.deepEqual(ui.seen.roleSet, ["finance_staff"]);
   assert.deepEqual(seen[0].f, [["id", USER]]);
+});
+
+// =====================================================================================
+// Payment entry ("Record an existing bill payment") must not offer unverified or cancelled bills
+// =====================================================================================
+const crypto = require("node:crypto");
+
+test("payment entry: draft and cancelled are not eligible; every other status is unchanged", () => {
+  assert.equal(verification.canRecordPaymentAgainst({ payment_status: "draft" }), false);
+  assert.equal(verification.canRecordPaymentAgainst({ payment_status: "cancelled" }), false);
+  for (const s of ["unpaid", "scheduled", "partially_paid", "overdue", "paid"]) assert.equal(verification.canRecordPaymentAgainst({ payment_status: s }), true, s);
+  assert.equal(verification.canRecordPaymentAgainst(null), false);
+  assert.equal(verification.canRecordPaymentAgainst(undefined), false);
+  assert.deepEqual([...verification.PAYMENT_ENTRY_EXCLUDED_STATUSES], ["draft", "cancelled"]);
+});
+
+test("payment entry: the real <PaymentForm bills=...> expression hides draft/cancelled bills and keeps eligible ones", () => {
+  const usages = [];
+  (function walk(n) {
+    if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(uiSf) === "PaymentForm") {
+      const attr = n.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(uiSf) === "bills");
+      usages.push(attr && attr.initializer && attr.initializer.expression ? attr.initializer.expression.getText(uiSf) : null);
+    }
+    ts.forEachChild(n, walk);
+  })(uiSf);
+  assert.equal(usages.length, 1, "exactly one PaymentForm call site");
+  const expr = usages[0];
+  assert.ok(expr && /canRecordPaymentAgainst/.test(expr), `bills prop must be filtered, got: ${expr}`);
+  const bills = [
+    { id: "d", payment_status: "draft" }, { id: "c", payment_status: "cancelled" }, { id: "u", payment_status: "unpaid" },
+    { id: "p", payment_status: "partially_paid" }, { id: "s", payment_status: "scheduled" }, { id: "o", payment_status: "overdue" }, { id: "x", payment_status: "paid" },
+  ];
+  const shown = new Function("bills", "canRecordPaymentAgainst", `return ${expr};`)(bills, verification.canRecordPaymentAgainst).map((b) => b.id);
+  assert.deepEqual(shown, ["u", "p", "s", "o", "x"]);
+  assert.ok(!shown.includes("d") && !shown.includes("c"));
+});
+
+function paymentDb(user, insertError = null) {
+  const calls = [];
+  const db = {
+    auth: { getUser: async () => ({ data: { user }, error: null }) },
+    from(table) { return { insert(payload) { calls.push({ table, payload }); return Promise.resolve({ data: null, error: insertError }); } }; },
+  };
+  return { db, calls };
+}
+const payBills = [
+  { id: "bill-draft", entity_id: ENTITY, payment_status: "draft" },
+  { id: "bill-cancelled", entity_id: ENTITY, payment_status: "cancelled" },
+  { id: "bill-unpaid", entity_id: ENTITY, payment_status: "unpaid" },
+  { id: "bill-partial", entity_id: ENTITY, payment_status: "partially_paid" },
+];
+const payment = (id) => ({ ...basePayment, supplier_bill_id: id });
+
+test("payment entry: savePayment refuses a draft or cancelled bill (stale selection) and inserts nothing", async () => {
+  for (const id of ["bill-draft", "bill-cancelled", "bill-missing", ""]) {
+    const { db, calls } = paymentDb({ id: USER });
+    const ui = makeUi({ db, bills: payBills, bill: baseBill, payment: payment(id), fetch: async () => ({ status: 200, body: {} }) });
+    await ui.fns.savePayment(ev);
+    assert.equal(calls.length, 0, id);
+    assert.equal(ui.seen.errors.length, 1, id);
+    assert.equal(ui.seen.messages.length, 0, id);
+  }
+});
+
+test("payment entry: an eligible payable bill still records a payment with created_by = session user", async () => {
+  for (const id of ["bill-unpaid", "bill-partial"]) {
+    const { db, calls } = paymentDb({ id: USER });
+    const ui = makeUi({ db, bills: payBills, bill: baseBill, payment: payment(id), fetch: async () => ({ status: 200, body: {} }) });
+    await ui.fns.savePayment(ev);
+    assert.equal(calls.length, 1, id);
+    assert.equal(calls[0].table, "bill_payments");
+    assert.equal(calls[0].payload.supplier_bill_id, id);
+    assert.equal(calls[0].payload.created_by, USER);
+    assert.equal(calls[0].payload.entity_id, ENTITY);
+    assert.deepEqual(ui.seen.errors, []);
+    assert.deepEqual(ui.seen.messages, ["Payment recorded."]);
+  }
+});
+
+test("payment entry: AAL2 / Owner-Finance-Manager enforcement stays in the database; a DB rejection is surfaced, not swallowed", async () => {
+  const { db, calls } = paymentDb({ id: USER }, { message: "new row violates row-level security policy for table \"bill_payments\"" });
+  const ui = makeUi({ db, bills: payBills, bill: baseBill, payment: payment("bill-unpaid"), fetch: async () => ({ status: 200, body: {} }) });
+  await ui.fns.savePayment(ev);
+  assert.equal(calls.length, 1, "the insert is still attempted through the user's own client so RLS decides");
+  assert.equal(ui.seen.errors.length, 1);
+  assert.match(ui.seen.errors[0], /row-level security/);
+  assert.deepEqual(ui.seen.messages, [], "no success message on rejection");
+  // the app adds no role/AAL logic of its own to the payment path
+  assert.ok(!/aal|mfa|role|owner|finance_manager|service[_-]?role/i.test(uiFns.savePayment), "savePayment must not add role/AAL handling");
+});
+
+test("scope: migrations 0021/0022 are byte-identical to the release (git blob hashes) and no 0023 exists", () => {
+  const gitBlobSha = (rel) => {
+    const lf = Buffer.from(fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n"), "utf8");
+    return crypto.createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${lf.length}\0`), lf])).digest("hex");
+  };
+  assert.equal(gitBlobSha("supabase/migrations/0021_stage1b_preflight_security_hardening.sql"), "d0de140e12a903944d3fea0543be8c760628ecbf");
+  assert.equal(gitBlobSha("supabase/migrations/0022_stage1b_finance_security_boundary.sql"), "1eadd009af9f127eabc1f371c33548ad627d7fb1");
+  assert.ok(!fs.readdirSync(path.join(ROOT, "supabase/migrations")).some((n) => /^0023/.test(n)));
 });

@@ -14,3 +14,11 @@ export function canVerifyBills(role: string | null | undefined): boolean {
 export function canVerifyBill(role: string | null | undefined, bill: { payment_status?: string | null } | null | undefined): boolean {
   return canVerifyBills(role) && bill?.payment_status === VERIFY_FROM_STATUS;
 }
+
+// "Record an existing bill payment" must not offer unverified (draft) or cancelled bills.
+// Every other status is left as it was; the Owner/Finance Manager + AAL2 requirement is enforced by the database.
+export const PAYMENT_ENTRY_EXCLUDED_STATUSES = ["draft", "cancelled"] as const;
+
+export function canRecordPaymentAgainst(bill: { payment_status?: string | null } | null | undefined): boolean {
+  return Boolean(bill) && !(PAYMENT_ENTRY_EXCLUDED_STATUSES as readonly string[]).includes(bill?.payment_status ?? "");
+}
