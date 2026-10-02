@@ -51,7 +51,7 @@ export type StoreProvider = () => Promise<IntakeStore | null>;
 export type HandlerDeps = { nowSeconds?: number; rateLimiter?: RateLimiter; storeProvider?: StoreProvider };
 
 /** The same opaque answer for every authentication failure; the reason is never returned. */
-function authenticate(req: HandlerRequest, config: FinanceOpsConfig, deps: HandlerDeps): { ok: true; keyId: string } | { ok: false; response: HandlerResponse } {
+export function authenticate(req: HandlerRequest, config: FinanceOpsConfig, deps: HandlerDeps): { ok: true; keyId: string } | { ok: false; response: HandlerResponse } {
   const auth = verifyRequest({
     keyId: req.headers.get(FINANCEOPS_HEADERS.keyId),
     timestamp: req.headers.get(FINANCEOPS_HEADERS.timestamp),
@@ -72,7 +72,7 @@ function authenticate(req: HandlerRequest, config: FinanceOpsConfig, deps: Handl
   return { ok: true, keyId: auth.keyId };
 }
 
-function requestIdFrom(headers: { get(name: string): string | null }): string {
+export function requestIdFrom(headers: { get(name: string): string | null }): string {
   const supplied = headers.get("x-request-id");
   return supplied && /^[A-Za-z0-9._:-]{1,64}$/.test(supplied) ? supplied : randomUUID();
 }

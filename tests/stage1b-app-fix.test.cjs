@@ -577,7 +577,7 @@ test("Q5: the gate only reads; this route never writes finance_intake_submission
   assert.ok(/service[_-]?role/i.test(src) === false);
 });
 
-test("scope: migrations 0021/0022/0023 are byte-identical to the release (git blob hashes) and no 0024+ exists", () => {
+test("scope: migrations 0021/0022/0023 are byte-identical to the release (git blob hashes); the only newer migration is the local 0024 candidate", () => {
   const gitBlobSha = (rel) => {
     const lf = Buffer.from(fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n"), "utf8");
     return crypto.createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${lf.length}\0`), lf])).digest("hex");
@@ -586,5 +586,7 @@ test("scope: migrations 0021/0022/0023 are byte-identical to the release (git bl
   assert.equal(gitBlobSha("supabase/migrations/0022_stage1b_finance_security_boundary.sql"), "1eadd009af9f127eabc1f371c33548ad627d7fb1");
   // 0023 is applied to Production and immutable; this application phase adds no migration.
   assert.equal(gitBlobSha("supabase/migrations/0023_financeops_intake_persistence.sql"), "b1a477448c1529a12fddd32f4822e2e809e39bc7");
-  assert.ok(!fs.readdirSync(path.join(ROOT, "supabase/migrations")).some((n) => /^00(2[4-9]|[3-9]d)/.test(n)));
+  // 0024 (Payment Register, bank import, matching) is a LOCAL candidate, not applied to Production; nothing beyond it exists.
+  const newer = fs.readdirSync(path.join(ROOT, "supabase/migrations")).filter((n) => /^00(2[4-9]|[3-9]d)/.test(n));
+  assert.deepEqual(newer, ["0024_finance_payment_register_and_bank_matching.sql"]);
 });

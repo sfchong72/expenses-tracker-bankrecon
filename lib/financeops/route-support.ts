@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import type { FinanceOpsConfig } from "./config";
 import { createStoreProvider } from "./db-session";
+import { createPaymentStoreProvider } from "./payments/db";
+import type { PaymentHandlerDeps } from "./payments/handler";
+import { paymentRegisterEnabled } from "./payments/types";
 import type { HandlerDeps } from "./handler";
 import { createRateLimiter, type RateLimiter } from "./rate-limit";
 import type { HandlerResponse } from "./responses";
@@ -23,4 +26,9 @@ export function sharedRateLimiter(config: FinanceOpsConfig): RateLimiter {
 
 export function handlerDeps(config: FinanceOpsConfig): HandlerDeps {
   return { rateLimiter: sharedRateLimiter(config), storeProvider: createStoreProvider(process.env) };
+}
+
+/** Deps for the payment-capture endpoints: its own feature flag (default OFF) plus the same rate limiter and identity session. */
+export function paymentHandlerDeps(config: FinanceOpsConfig): PaymentHandlerDeps {
+  return { rateLimiter: sharedRateLimiter(config), paymentStoreProvider: createPaymentStoreProvider(process.env), paymentRegisterEnabled: paymentRegisterEnabled(process.env) };
 }

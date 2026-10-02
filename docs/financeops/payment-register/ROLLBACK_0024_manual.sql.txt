@@ -1,0 +1,37 @@
+-- MANUAL rollback of migration 0024 (Payment Register, bank import, matching). NOT part of the migration chain.
+-- Valid only while the feature is unused: it DROPS every payment register row, document row, bank import and match.
+-- It does not delete files already stored in the finance-payment-documents bucket (remove those from the
+-- Supabase dashboard first if the bucket is not empty; a bucket that still holds objects cannot be deleted).
+-- After it runs, remove the ledger row deliberately:
+--   delete from supabase_migrations.schema_migrations where version = '0024';
+--   (or: supabase migration repair --status reverted 0024)
+-- Then compare the catalogue with the pre-0024 snapshot; they must be identical.
+begin;
+
+drop policy if exists finance_payment_documents_storage_read on storage.objects;
+drop policy if exists finance_payment_documents_storage_insert on storage.objects;
+-- The bucket itself cannot be removed with SQL (storage.protect_delete blocks it): empty and delete the bucket
+-- 'finance-payment-documents' from the Supabase dashboard / Storage API. An empty bucket left behind is harmless.
+
+drop table if exists public.finance_payment_bank_matches;
+drop table if exists public.finance_bank_statement_transactions;
+drop table if exists public.finance_bank_import_batches;
+drop table if exists public.finance_payment_documents;
+drop table if exists public.finance_payment_register;
+
+drop function if exists public.audit_finance_bank_match_change();
+drop function if exists public.enforce_finance_bank_match_rules();
+drop function if exists public.audit_finance_bank_batch();
+drop function if exists public.enforce_finance_bank_rows();
+drop function if exists public.audit_finance_payment_document_change();
+drop function if exists public.enforce_finance_payment_document_rules();
+drop function if exists public.audit_finance_payment_change();
+drop function if exists public.enforce_finance_payment_rules();
+drop function if exists app_private.user_can_access_payment_document_object(text);
+drop function if exists app_private.finance_payment_missing_documents(uuid, text[], text[], uuid);
+drop function if exists app_private.finance_payment_has_confirmed_match(uuid);
+drop function if exists app_private.current_user_is_financeops_identity();
+drop function if exists app_private.current_user_is_finance_reviewer();
+
+notify pgrst, 'reload schema';
+commit;
