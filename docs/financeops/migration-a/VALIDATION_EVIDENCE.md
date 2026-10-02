@@ -1,6 +1,8 @@
-# Migration A — disposable validation evidence
+# Migration A — disposable validation evidence (design-draft run)
 
-**Scope: a disposable local Supabase stack only.** No Production database, hosted project, Vercel, migration ledger, Auth provisioning or SQL Account was touched. Generated from the actual run outputs of the final proposed SQL (`PROPOSED_migration_a_financeops_intake.sql.txt`) on 2026-10-02.
+> **Superseded for the numbered file by [`MIGRATION_0023_MANIFEST.md`](MIGRATION_0023_MANIFEST.md)**, which records the full re-validation of the exact committed `0023` file (including a second-application test, a one-shot replay comparison, and a rollback test). This document records the earlier run of the un-numbered design draft and is kept for history.
+
+**Scope: a disposable local Supabase stack only.** No Production database, hosted project, Vercel, migration ledger, Auth provisioning or SQL Account was touched. Generated from the actual run outputs of the un-numbered design draft (`PROPOSED_migration_a_financeops_intake.sql.txt`, since numbered as 0023) on 2026-10-02.
 
 ## Environment
 - Supabase CLI 2.117.0 (npm, local binary; commands used: `start`, `db reset --local`, `migration up --local`, `test db --local`, `db lint --local`, `db advisors --local`, `stop`; never `--linked`, `link`, `push`, `pull`, `--db-url`, `repair`).
@@ -86,7 +88,7 @@ Snapshot = one line per object (`kind|identifier|md5(definition)`) for policies 
 The 0020 suite is valid only at its baseline point: on the final state it fails 8 tests (bill_payments/supplier_bills/document_links policy assertions, tests 45–47, 49–51, 53–54) because 0022 intentionally replaced those policies. It fails identically before and after Migration A (Migration A changes none of those objects — see §2).
 
 ## 4. Migration A pgTAP
-`tests/migration_a_financeops_intake.test.sql`: **240 assertions, 240 PASS** (registry; insert/idempotency; visibility; resolution; supersession; record links; review/data_verified invariants; kill switch; FK SET NULL cascades; audit incl. fail-closed; no-delete; Stage 1B guard rails for the FinanceOps identity including a forged `aal2` claim; structure/privileges).
+`supabase/tests/0023_financeops_intake_persistence.test.sql` (then named `tests/migration_a_financeops_intake.test.sql`): **240 assertions, 240 PASS** (registry; insert/idempotency; visibility; resolution; supersession; record links; review/data_verified invariants; kill switch; FK SET NULL cascades; audit incl. fail-closed; no-delete; Stage 1B guard rails for the FinanceOps identity including a forged `aal2` claim; structure/privileges).
 
 ## 5. Two-session race checks (`tests/race_setup.sql`, `tests/race_checks.sh`)
 | Race | Outcome |

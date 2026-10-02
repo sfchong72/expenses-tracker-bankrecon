@@ -1,6 +1,6 @@
-# FinanceOps Phase 1A — Migration A review package (v2: decisions applied, disposable validation passed)
+# FinanceOps Phase 1A — Migration A review package (v2) — NOW NUMBERED AS 0023
 
-**Status: READY FOR OWNER APPROVAL TO NUMBER. Not numbered. Not applied to Production. Not deployed.** The SQL is [`PROPOSED_migration_a_financeops_intake.sql.txt`](PROPOSED_migration_a_financeops_intake.sql.txt) — un-numbered, `.sql.txt`, deliberately outside `supabase/migrations/`. Tests and evidence: [`tests/`](tests/) and [`VALIDATION_EVIDENCE.md`](VALIDATION_EVIDENCE.md). Design authority: `FINANCEOPS_HUB_PHASE1_IMPLEMENTATION_SPEC.md` and `FINANCEOPS_PHASE1_CLAUDE_HANDOVER.md` (D1–D11 preserved).
+**Status: NUMBERED AS 0023 (owner-approved, immutable candidate). Validated again as the exact committed file — see [`MIGRATION_0023_MANIFEST.md`](MIGRATION_0023_MANIFEST.md). Not applied to Production. Not deployed.** The SQL is now `supabase/migrations/0023_financeops_intake_persistence.sql` and the pgTAP suite `supabase/tests/0023_financeops_intake_persistence.test.sql` (this document describes the design they implement; the earlier un-numbered file name `PROPOSED_migration_a_financeops_intake.sql.txt` in git history is the same content before numbering). Rollback (manual, not a migration): [`ROLLBACK_0023_manual.sql.txt`](ROLLBACK_0023_manual.sql.txt). Tests and evidence: [`tests/`](tests/) and [`VALIDATION_EVIDENCE.md`](VALIDATION_EVIDENCE.md). Design authority: `FINANCEOPS_HUB_PHASE1_IMPLEMENTATION_SPEC.md` and `FINANCEOPS_PHASE1_CLAUDE_HANDOVER.md` (D1–D11 preserved).
 
 Base: released `origin/main` = `31e84d3d56cf1ee8ed047ea2873147fa71119cf3` (Stage 1B complete). Migration `0022` blob `1eadd009af9f127eabc1f371c33548ad627d7fb1` unchanged.
 
@@ -108,9 +108,9 @@ Other application requirements: persistence order = insert intake → create dra
 ## 9. How to reproduce (local only; no hosted project, no `--linked`, no `db push`)
 1. Disposable folder with `supabase init`, ports offset, studio/realtime/edge-runtime/analytics/mail disabled; copy 0001–0018, 0020 into `supabase/migrations/`, `supabase start`; run `supabase test db --local` on the 0020 suite; add 0021, `supabase migration up --local`, run its suite; add 0022 likewise (run the 0022 suite **before** loading Stage 1B fixtures — it is count-sensitive).
 2. Snapshot the catalogue, apply the proposed SQL with `psql` (no migration number), snapshot again and diff.
-3. Run `tests/migration_a_financeops_intake.test.sql` with `supabase test db --local`; then `tests/race_setup.sql` and `tests/race_checks.sh` (set `DBC` to the disposable db container).
+3. Run `supabase/tests/0023_financeops_intake_persistence.test.sql` with `supabase test db --local`; then `tests/race_setup.sql` and `tests/race_checks.sh` (set `DBC` to the disposable db container).
 4. Run `supabase db advisors --local` and `supabase db lint --local` before and after.
 5. `supabase stop --no-backup`, delete the disposable folder.
 
 ## 10. Confirmation
-No Production database, Vercel Production, migration ledger, Supabase hosted project, Auth user provisioning or SQL Account was touched. No file exists in `supabase/migrations/` for this work. No `db push`, deployment or merge occurred.
+No Production database, Vercel Production, migration ledger, Supabase hosted project, Auth user provisioning or SQL Account was touched. The only migration file is the numbered, un-applied candidate 0023 (never applied to any shared or Production database). No `db push`, deployment or merge occurred.

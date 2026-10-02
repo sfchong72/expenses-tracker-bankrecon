@@ -1,0 +1,27 @@
+-- MANUAL ROLLBACK for 0023 (FinanceOps Phase 1A intake persistence).
+-- NOT a migration: lives under docs/, named .sql.txt, never picked up by supabase tooling.
+-- Valid ONLY while 0023 is unused (disposable lab, or Production before the first real intake): it destroys
+-- every intake, its audit lineage references, and the integration registry. Take a backup first if any real
+-- row exists. Run it as the migration owner (postgres). Nothing outside 0023's own objects is touched.
+-- Removing the migration-ledger row (supabase_migrations.schema_migrations, version '0023') is a separate,
+-- environment-specific step and is deliberately NOT part of this file.
+begin;
+
+drop view if exists public.finance_intake_queue;
+
+-- triggers and policies go with their tables; named here for clarity and safety
+drop trigger if exists fis_audit_changes on public.finance_intake_submissions;
+drop trigger if exists fis_enforce_rules on public.finance_intake_submissions;
+drop trigger if exists fii_enforce_rules on public.finance_integration_identities;
+
+-- the self-referencing supersedes_intake_id FK is dropped with the table
+drop table if exists public.finance_intake_submissions;
+drop table if exists public.finance_integration_identities;
+
+drop function if exists public.audit_finance_intake_change();
+drop function if exists public.enforce_finance_intake_rules();
+drop function if exists public.enforce_finance_integration_identity();
+drop function if exists app_private.intake_is_superseded(text);
+drop function if exists app_private.current_user_can_review_unresolved_intakes();
+
+commit;
